@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DATALINA WEB | Sintetizador Gráfico</title>
+    <title>CATALINA WEB | Sintetizador Gráfico</title>
     <link rel="stylesheet" href="assets/css/styles.css">
 </head>
 <body>
 
-    <h1>DATALINA <span>WEB</span></h1>
-    <p class="subtitle">Sintetizador Gráfico por Escaneo Raster | Homenaje a Catalina & ANS</p>
+    <h1>CATALINA <span>WEB</span></h1>
+    <p class="subtitle">Sintetizador Gráfico por Escaneo Raster | Homenaje a von Reichenbach</p>
 
     <div class="studio-container">
         <div class="canvas-wrapper" id="canvasWrapper">
@@ -18,6 +18,26 @@
         </div>
 
         <div class="controls">
+            <!-- SECCIÓN 1: MODOS DE ESCANEO -->
+            <div class="control-section">
+                <label class="section-label">Modos de Escaneo</label>
+                <div class="toggles-container">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="toggleInvert">
+                        <span class="toggle-text">Invertir</span>
+                    </label>
+                    <label class="toggle-label">
+                        <input type="checkbox" id="toggleLoop" checked>
+                        <span class="toggle-text">Loop</span>
+                    </label>
+                    <label class="toggle-label">
+                        <input type="checkbox" id="toggleRND">
+                        <span class="toggle-text">RND</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- SECCIÓN 2: CONTROLES PRINCIPALES -->
             <div class="control-group">
                 <div class="file-input-wrapper">
                     <div class="file-input-btn">📁 Cargar Dibujo (JPG/PNG)</div>
@@ -35,14 +55,28 @@
                 <input type="range" id="paramSpeed" min="0.5" max="10" step="0.1" value="2.0">
             </div>
 
-            <div class="control-group">
-                <label>Frecuencia Base <span class="value-display" id="valFreq">C3</span></label>
-                <input type="range" id="paramFreq" min="0" max="4" step="1" value="0">
+            <!-- SECCIÓN 3: RANGO DE FRECUENCIAS -->
+            <div class="control-section">
+                <label class="section-label">Rango de Frecuencias (Hz)</label>
+                <div class="control-group">
+                    <label>Mín (Límite Inf) <span class="value-display" id="valFreqMin">100 Hz</span></label>
+                    <input type="range" id="paramFreqMin" min="20" max="1000" step="1" value="100">
+                </div>
+                <div class="control-group">
+                    <label>Máx (Límite Sup) <span class="value-display" id="valFreqMax">2000 Hz</span></label>
+                    <input type="range" id="paramFreqMax" min="200" max="8000" step="1" value="2000">
+                </div>
             </div>
 
+            <!-- SECCIÓN 4: PROCESAMIENTO Y SALIDA -->
             <div class="control-group">
                 <label>Filtro (Brillo → Cutoff) <span class="value-display" id="valFilter">50%</span></label>
                 <input type="range" id="paramFilter" min="0" max="100" step="1" value="50">
+            </div>
+
+            <div class="control-group">
+                <label>Volumen Master <span class="value-display" id="valVol">80%</span></label>
+                <input type="range" id="paramVol" min="0" max="100" step="1" value="80">
             </div>
 
             <div class="control-group" style="margin-top: auto;">
