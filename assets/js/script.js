@@ -48,10 +48,14 @@ const scrubSlider = document.getElementById('paramScrub');
 // --- FUNCIÓN: DIBUJAR OVERLAY DE BANDAS ---
 function drawBandsOverlay() {
     if (!state.width || !state.height) return;
+    
     const bandHeight = state.height / CONFIG.bands;
-    ctx.strokeStyle = 'rgba(0, 255, 157, 0.3)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 5]);
+    
+    // Aumentar opacidad y hacer líneas más visibles
+    ctx.strokeStyle = 'rgba(0, 255, 157, 0.5)'; // De 0.3 a 0.5
+    ctx.lineWidth = 2; // De 1 a 2 para mejor visibilidad
+    ctx.setLineDash([8, 4]); // Líneas más largas
+    
     for (let i = 1; i < CONFIG.bands; i++) {
         const y = i * bandHeight;
         ctx.beginPath();
@@ -59,6 +63,7 @@ function drawBandsOverlay() {
         ctx.lineTo(state.width, y);
         ctx.stroke();
     }
+    
     ctx.setLineDash([]);
 }
 

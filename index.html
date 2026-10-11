@@ -17,12 +17,12 @@
             <canvas id="visualizer" width="800" height="400"></canvas>
         </div>
 
-        <div class="controls">
+        <aside class="controls">
             <!-- SECCIÓN 1: MODOS DE ESCANEO -->
             <div class="control-section">
                 <label class="section-label">Modos de Escaneo</label>
                 <div class="toggles-container">
-                    <label class="toggle-label">
+                    <label class="toggle-label" title="Actívalo si tu dibujo tiene líneas negras sobre fondo blanco">
                         <input type="checkbox" id="toggleInvert" checked>
                         <span class="toggle-text">Trazo = Sonido</span>
                     </label>
@@ -36,7 +36,7 @@
 					</label>
                     <label class="toggle-label">
                         <input type="checkbox" id="toggleRND">
-                        <span class="toggle-text">RND</span>
+                        <span class="toggle-text">RANDOM</span>
                     </label>
                 </div>
             </div>
@@ -113,7 +113,7 @@
             </div>
             
             <div class="status" id="statusText">Esperando imagen...</div>
-        </div>
+        </aside>
     </div>
 
     <script src="assets/js/script.js"></script>

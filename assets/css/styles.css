@@ -23,16 +23,17 @@ h1 span { color: var(--accent); }
 
 .studio-container {
     display: grid;
-    grid-template-columns: 1fr 300px;
+    grid-template-columns: 1fr 380px;
     gap: 2rem;
     width: 100%;
-    max-width: 1000px;
+    max-width: 1200px;
 }
 
 .canvas-wrapper {
+	transition: all 0.3s ease;
     background: var(--panel);
     border-radius: 8px;
-    padding: 1rem;
+    padding: 2rem;
     position: relative;
     border: 1px solid #333;
     display: flex;
@@ -40,22 +41,29 @@ h1 span { color: var(--accent); }
     align-items: center;
     min-height: 400px;
 }
+
+.canvas-wrapper.image-loaded {
+    transform: scale(1.02);
+}
+
 canvas {
     max-width: 100%;
     height: auto;
     border-radius: 4px;
-    background: #000;
+    background: rgba(255, 255, 255, 0.95); /* Casi blanco pero no puro */
+    border: 1px solid #333;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 .playhead {
     position: absolute;
     top: 1rem;
     bottom: 1rem;
-    width: 2px;
+    width: 3px;
     background: var(--accent);
-    box-shadow: 0 0 10px var(--accent);
+    box-shadow: 0 0 15px var(--accent);
     pointer-events: none;
     display: none;
-    z-index: 10;
+    z-index: 20;
 }
 
 .controls {
@@ -66,12 +74,27 @@ canvas {
     display: flex;
     flex-direction: column;
     gap: 1.2rem;
+	scrollbar-width: thin; /* Firefox */
+    scrollbar-color: #00ff9d #1e1e24;
+}
+
+.controls::-webkit-scrollbar {
+    width: 6px;
+}
+
+.controls::-webkit-scrollbar-track {
+    background: #1e1e24;
+}
+
+.controls::-webkit-scrollbar-thumb {
+    background: #00ff9d;
+    border-radius: 3px;
 }
 
 .control-section {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.4rem;
     padding-bottom: 0.5rem;
     border-bottom: 1px solid #333;
 }
@@ -86,7 +109,9 @@ canvas {
 .toggles-container {
     display: flex;
     justify-content: space-between;
-    gap: 0.5rem;
+    flex-wrap: wrap; /* Permite que los toggles bajen si no hay espacio */
+    gap: 0.8rem; /* Un poco más de espacio entre toggles */
+    align-items: center;
 }
 .toggle-label {
     display: flex;
@@ -96,6 +121,7 @@ canvas {
     font-size: 0.85rem;
     color: var(--text-dim);
     user-select: none;
+	white-space: nowrap;
 }
 .toggle-label input[type="checkbox"] {
     accent-color: var(--accent);
@@ -104,7 +130,7 @@ canvas {
     cursor: pointer;
 }
 
-.control-group { display: flex; flex-direction: column; gap: 0.4rem; }
+.control-group { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.5rem;}
 label { font-size: 0.8rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
 
 input[type="range"] {
@@ -217,4 +243,115 @@ button.secondary:hover { background: var(--accent-dim); }
 
 .hidden {
     display: none !important;
+}
+
+/* Pantallas medianas (laptops, tablets grandes) */
+@media (max-width: 1280px) and (min-width: 1024px) {
+    .studio-container {
+        grid-template-columns: 1fr 340px; /* Ancho intermedio */
+        max-width: 1100px;
+    }
+    
+    .toggle-label {
+        font-size: 0.8rem; /* Un poco más pequeño */
+    }
+}
+
+/* Tablet */
+@media (max-width: 1024px) {
+    .studio-container {
+        grid-template-columns: 1fr; /* Una columna */
+        gap: 1.5rem;
+    }
+    
+    .canvas-wrapper {
+        min-height: 300px;
+        order: 1; /* Canvas primero */
+    }
+    
+    .controls {
+        order: 2; /* Controles debajo */
+        max-height: 60vh; /* Limitar altura */
+        overflow-y: auto; /* Scroll si es necesario */
+    }
+}
+
+/* Móvil */
+@media (max-width: 768px) {
+    body {
+        padding: 1rem;
+    }
+    
+    h1 {
+        font-size: 1.2rem;
+    }
+    
+    .subtitle {
+        font-size: 0.8rem;
+    }
+    
+    .studio-container {
+        gap: 1rem;
+    }
+    
+    .canvas-wrapper {
+        padding: 1rem;
+        min-height: 250px;
+    }
+    
+    canvas {
+        max-height: 50vh; /* Canvas más pequeño en móvil */
+    }
+    
+    .controls {
+        padding: 1rem;
+        gap: 0.8rem;
+    }
+    
+    /* Hacer los controles más "tocables" */
+    input[type="range"] {
+        height: 32px; /* Área táctil más grande */
+    }
+    
+    button {
+        padding: 1rem;
+        font-size: 1rem;
+    }
+    
+    .toggles-container {
+        flex-wrap: wrap; /* Permitir que los toggles hagan wrap */
+        gap: 0.8rem;
+    }
+    
+    .toggle-label {
+        font-size: 0.75rem;
+    }
+    
+    /* Ajustar el modo switch para móvil */
+    .mode-switch {
+        flex-direction: column;
+        gap: 4px;
+    }
+    
+    .mode-btn {
+        padding: 8px;
+        font-size: 0.75rem;
+    }
+}
+
+/* Móvil muy pequeño */
+@media (max-width: 480px) {
+    .value-display {
+        font-size: 0.75rem;
+    }
+    
+    label {
+        font-size: 0.7rem;
+    }
+    
+    /* Colapsar secciones en móvil muy pequeño */
+    .control-section {
+        border-bottom: 1px solid #333;
+        padding-bottom: 0.8rem;
+    }
 }
