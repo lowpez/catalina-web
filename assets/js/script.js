@@ -433,23 +433,19 @@ document.getElementById('selectRootNote').addEventListener('change', (e) => {
     updateFrequencies();
 });
 
-// Sliders de Frecuencia (Manejo Dual)
+// Sliders de Frecuencia (Manejo Dual - Versión Minimalista)
 document.getElementById('paramFreqMin').addEventListener('input', (e) => {
     state.freqMin = parseInt(e.target.value);
     document.getElementById('valFreqMin').textContent = state.freqMin + ' Hz';
     updateFrequencies();
-    if (state.currentMode === 'musical') {
-        document.getElementById('selectRootNote').value = ""; // Indicar ajuste manual
-    }
+    // (Aquí ya no hay nada, el dropdown se queda quieto en la última nota elegida)
 });
 
 document.getElementById('paramFreqMax').addEventListener('input', (e) => {
     state.freqMax = parseInt(e.target.value);
     document.getElementById('valFreqMax').textContent = state.freqMax + ' Hz';
     updateFrequencies();
-    if (state.currentMode === 'musical') {
-        document.getElementById('selectRootNote').value = ""; // Indicar ajuste manual
-    }
+    // (Aquí tampoco hay nada)
 });
 
 // Slider de Velocidad
