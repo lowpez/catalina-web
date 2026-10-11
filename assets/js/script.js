@@ -1,5 +1,5 @@
 /**
- * CATALINA WEB - Core Engine (Fase 1 - Híbrido Musical/Espectral)
+ * CATALINA WEB - Core Engine (Fase 2 - Visualización de Bandas)
  * Arquitectura: Pre-procesamiento + Web Audio API + Modos de Escaneo
  * Homenaje al Catalina de Fernando von Reichenbach (1960s)
  */
@@ -41,6 +41,30 @@ const canvas = document.getElementById('visualizer');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
 const playhead = document.getElementById('playhead');
 const statusText = document.getElementById('statusText');
+
+// --- FUNCIÓN: DIBUJAR OVERLAY DE BANDAS ---
+function drawBandsOverlay() {
+    if (!state.width || !state.height) return;
+    
+    const bandHeight = state.height / CONFIG.bands;
+    
+    // Estilo sutil: color accent con 30% opacidad, líneas punteadas
+    ctx.strokeStyle = 'rgba(0, 255, 157, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    
+    // Dibujar 7 líneas horizontales (crean 8 bandas)
+    for (let i = 1; i < CONFIG.bands; i++) {
+        const y = i * bandHeight;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(state.width, y);
+        ctx.stroke();
+    }
+    
+    // Resetear dash para otros dibujos
+    ctx.setLineDash([]);
+}
 
 // --- INICIALIZACIÓN DE AUDIO ---
 function initAudio() {
@@ -144,6 +168,10 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
         }
 
         ctx.putImageData(imageData, 0, 0);
+        
+        // NUEVO: Dibujar overlay de bandas después de la imagen
+        drawBandsOverlay();
+        
         state.imageData = imageData;
         state.scanX = 0;
         
@@ -438,14 +466,12 @@ document.getElementById('paramFreqMin').addEventListener('input', (e) => {
     state.freqMin = parseInt(e.target.value);
     document.getElementById('valFreqMin').textContent = state.freqMin + ' Hz';
     updateFrequencies();
-    // (Aquí ya no hay nada, el dropdown se queda quieto en la última nota elegida)
 });
 
 document.getElementById('paramFreqMax').addEventListener('input', (e) => {
     state.freqMax = parseInt(e.target.value);
     document.getElementById('valFreqMax').textContent = state.freqMax + ' Hz';
     updateFrequencies();
-    // (Aquí tampoco hay nada)
 });
 
 // Slider de Velocidad
