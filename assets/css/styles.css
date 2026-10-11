@@ -44,7 +44,7 @@ margin-bottom: 2rem;
 
 /* --- BARRA DE ESTADO SUPERIOR --- */
 .app-header {
-    width: 100%;
+    width: 36%;
     max-width: 1200px;
     display: flex;
     align-items: center;
@@ -58,6 +58,9 @@ margin-bottom: 2rem;
     font-size: 0.85rem;
     color: var(--text-label);
     transition: all 0.3s ease;
+	position: sticky;
+	top: 1rem;
+	z-index: 100;
 }
 
 .status-indicator {

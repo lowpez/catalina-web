@@ -18,19 +18,19 @@ El usuario carga un dibujo (lÃ­neas, formas, patrones), y un motor de escaneo ra
 ```
 
 INPUT (File API) 
-  â†“
-PRE-PROCESS (Canvas) â†’ Convierte a Grayscale â†’ Calcula "Column Data" (Bandas de brillo por columna X)
-  â†“
-STATE MACHINE â†’ isPlaying, scanPosition (0 a width), speed
-  â†“
+  â†?
+PRE-PROCESS (Canvas) â†?Convierte a Grayscale â†?Calcula "Column Data" (Bandas de brillo por columna X)
+  â†?
+STATE MACHINE â†?isPlaying, scanPosition (0 a width), speed
+  â†?
 AUDIO ENGINE (Web Audio API) 
   â”œâ”€â”€ 8x OscillatorNode (Frecuencias fijas en escala PentatÃ³nica)
   â”œâ”€â”€ 8x GainNode (Modulados por el brillo de la banda en la columna X actual)
   â””â”€â”€ 1x BiquadFilterNode (Lowpass, modulado por el brillo total de la columna)
-  â†“
-RENDER LOOP (requestAnimationFrame) â†’ Actualiza posiciÃ³n del playhead visual y parÃ¡metros de audio
-  â†“
-EXPORT (OfflineAudioContext) â†’ Renderizado rÃ¡pido a AudioBuffer â†’ Codificador WAV 16-bit PCM
+  â†?
+RENDER LOOP (requestAnimationFrame) â†?Actualiza posiciÃ³n del playhead visual y parÃ¡metros de audio
+  â†?
+EXPORT (OfflineAudioContext) â†?Renderizado rÃ¡pido a AudioBuffer â†?Codificador WAV 16-bit PCM
 
 ```
 
@@ -53,6 +53,28 @@ EXPORT (OfflineAudioContext) â†’ Renderizado rÃ¡pido a AudioBuffer â†’ Codificad
 4. Haz clic en **"INICIAR AUDIO"** *(el navegador requiere una interacciÃ³n del usuario para desbloquear el contexto de audio)*.
 5. Ajusta los sliders en tiempo real mientras escuchas la evoluciÃ³n del sonido.
 6. Cuando tengas una versiÃ³n que te guste, haz clic en **"EXPORTAR A WAV"** para guardar tu creaciÃ³n.
+
+## ?? Gu¨ªa R¨¢pida para el Taller (Paso a Paso)
+
+?Bienvenido a Catalina Web! No necesitas saber programar ni m¨²sica para usarlo. Sigue estos 3 pasos:
+
+1. **?? Dibuja y Carga**: 
+   - Dibuja en una hoja blanca con trazos **negros y gruesos** (l¨ªneas horizontales, ondas o patrones funcionan mejor).
+   - Toma una foto o escan¨¦ala y c¨¢rgala con el bot¨®n **"?? Cargar Dibujo"**.
+   - *Importante:* Aseg¨²rate de que el toggle **"Trazo = Sonido"** est¨¦ activado (verde).
+
+2. **??? Escucha y Ajusta**: 
+   - Presiona **"? Iniciar Audio"**.
+   - Juega con la **Velocidad** para hacer el sonido m¨¢s r¨¢pido o lento.
+   - Prueba el modo **Ping-Pong** para un sonido continuo sin cortes, o **RANDOM** para texturas impredecibles.
+   - Usa la barra **Posici¨®n Manual (Scrub)** para "tocar" tu dibujo como si fuera un instrumento.
+
+3. **?? Guarda tu Creaci¨®n**: 
+   - Cuando encuentres un sonido que te guste, presiona **"?? Exportar a WAV"**.
+   - ?Listo! Tendr¨¢s un archivo de audio listo para usar en tu m¨²sica, video o proyecto.
+
+> ?? **Consejo Pro:** Si tu dibujo tiene muchas l¨ªneas finas, activa el **Modo Espectral** y sube el rango de frecuencias para obtener sonidos m¨¢s met¨¢licos y experimentales.
+
 
 ## 6. OptimizaciÃ³n (Criterio de Director TÃ©cnico)
 
