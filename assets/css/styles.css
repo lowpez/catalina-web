@@ -245,6 +245,22 @@ button.secondary:hover { background: var(--accent-dim); }
     display: none !important;
 }
 
+/* Desktop: Canvas sticky + Sidebar con scroll independiente */
+@media (min-width: 1025px) {
+    .canvas-wrapper {
+        position: sticky;
+        top: 2rem; /* Espacio desde el borde superior */
+        align-self: start; /* CRÍTICO: sin esto, sticky no funciona en grid */
+        max-height: calc(100vh - 4rem); /* Evita que se salga de la pantalla */
+        overflow: hidden;
+    }
+    
+    .controls {
+       /* max-height: calc(100vh - 4rem); /* Misma altura máxima */
+       /* overflow-y: auto; /* Scroll independiente */
+    }
+}
+
 /* Pantallas medianas (laptops, tablets grandes) */
 @media (max-width: 1280px) and (min-width: 1024px) {
     .studio-container {
