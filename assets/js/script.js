@@ -1,6 +1,7 @@
 /**
- * CATALINA WEB - Core Engine (Fase 1)
+ * CATALINA WEB - Core Engine (Fase 1 - Híbrido Musical/Espectral)
  * Arquitectura: Pre-procesamiento + Web Audio API + Modos de Escaneo
+ * Homenaje al Catalina de Fernando von Reichenbach (1960s)
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -20,12 +21,17 @@ const state = {
     width: 0,
     height: 0,
     
-    // Nuevos parámetros Fase 1
-    isInverted: false,
+    // Modos de escaneo
+    isInverted: true,
     isLooping: true,
     isRandom: false,
-    freqMin: 100,
-    freqMax: 2000,
+    
+    // Frecuencias
+    freqMin: 65,
+    freqMax: 523,
+    currentMode: 'musical', // 'musical' | 'spectral'
+    
+    // Procesamiento
     masterVolume: 0.8,
     filterAmount: 0.5
 };
@@ -83,6 +89,9 @@ function updateFrequencies() {
     const min = state.freqMin;
     const max = state.freqMax;
     
+    // Evitar división por cero o valores inválidos
+    if (min <= 0 || max <= 0 || min >= max) return;
+    
     for (let i = 0; i < CONFIG.bands; i++) {
         const ratio = i / (CONFIG.bands - 1);
         const freq = min * Math.pow(max / min, ratio);
@@ -107,7 +116,7 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
         const imageData = ctx.getImageData(0, 0, state.width, state.height);
         const data = imageData.data;
 
-        // Pre-calcular bandas
+        // Pre-calcular bandas (O(1) en tiempo real)
         state.columnData = new Float32Array(state.width * CONFIG.bands);
         const bandHeight = state.height / CONFIG.bands;
 
@@ -125,6 +134,7 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
                     totalBrightness += brightness;
                     pixelCount++;
                     
+                    // Convertir a escala de grises visual
                     const gray = brightness * 255;
                     data[idx] = data[idx+1] = data[idx+2] = gray;
                 }
@@ -311,6 +321,7 @@ async function exportWAV() {
     document.getElementById('btnExport').disabled = false;
 }
 
+// Función auxiliar para codificar AudioBuffer a WAV 16-bit PCM
 function bufferToWave(abuffer, len) {
     let numOfChan = abuffer.numberOfChannels,
         length = len * numOfChan * 2 + 44,
@@ -318,10 +329,19 @@ function bufferToWave(abuffer, len) {
         view = new DataView(buffer),
         channels = [], i, sample, offset = 0, pos = 0;
 
-    setUint32(0x46464952); setUint32(length - 8); setUint32(0x45564157);
-    setUint32(0x20746d66); setUint32(16); setUint16(1); setUint16(numOfChan);
-    setUint32(abuffer.sampleRate); setUint32(abuffer.sampleRate * 2 * numOfChan);
-    setUint16(numOfChan * 2); setUint16(16); setUint32(0x61746164); setUint32(length - pos - 4);
+    setUint32(0x46464952); // "RIFF"
+    setUint32(length - 8); // file length - 8
+    setUint32(0x45564157); // "WAVE"
+    setUint32(0x20746d66); // "fmt " chunk
+    setUint32(16); // length = 16
+    setUint16(1); // PCM (uncompressed)
+    setUint16(numOfChan);
+    setUint32(abuffer.sampleRate);
+    setUint32(abuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
+    setUint16(numOfChan * 2); // block-align
+    setUint16(16); // 16-bit
+    setUint32(0x61746164); // "data" - chunk
+    setUint32(length - pos - 4); // chunk length
 
     for(i = 0; i < abuffer.numberOfChannels; i++) channels.push(abuffer.getChannelData(i));
 
@@ -340,39 +360,111 @@ function bufferToWave(abuffer, len) {
     function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
 }
 
+// --- GESTIÓN DE MODOS (MUSICAL / ESPECTRAL) ---
+function setMode(mode) {
+    state.currentMode = mode;
+    const sliderMin = document.getElementById('paramFreqMin');
+    const sliderMax = document.getElementById('paramFreqMax');
+    const rootNoteContainer = document.getElementById('rootNoteContainer');
+
+    if (mode === 'musical') {
+        // Modo Musical: Rango limitado, muestra la nota raíz
+        rootNoteContainer.classList.remove('hidden');
+        sliderMin.max = 1000;
+        sliderMax.max = 8000;
+        
+        // Re-afinar automáticamente a la nota seleccionada
+        document.getElementById('selectRootNote').dispatchEvent(new Event('change'));
+        statusText.textContent = "Modo Musical: Escala temperada activa.";
+    } else {
+        // Modo Espectral: Rango completo (20Hz - 20kHz), oculta la nota raíz
+        rootNoteContainer.classList.add('hidden');
+        sliderMin.max = 20000;
+        sliderMax.max = 20000;
+        statusText.textContent = "Modo Espectral: Libertad total de Hz (Datalina/ANS).";
+    }
+}
+
 // --- EVENT LISTENERS ---
+
+// Botones principales
 document.getElementById('btnPlay').addEventListener('click', play);
 document.getElementById('btnStop').addEventListener('click', stop);
 document.getElementById('btnExport').addEventListener('click', exportWAV);
 
-// Toggles
+// Toggles de modos de escaneo
 document.getElementById('toggleInvert').addEventListener('change', (e) => state.isInverted = e.target.checked);
 document.getElementById('toggleLoop').addEventListener('change', (e) => state.isLooping = e.target.checked);
 document.getElementById('toggleRND').addEventListener('change', (e) => state.isRandom = e.target.checked);
 
-// Sliders
-document.getElementById('paramSpeed').addEventListener('input', (e) => {
-    state.durationSec = parseFloat(e.target.value);
-    document.getElementById('valSpeed').textContent = state.durationSec.toFixed(1) + 's';
+// Switch de Modo Musical/Espectral
+document.getElementById('btnModeMusical').addEventListener('click', () => {
+    if (state.currentMode !== 'musical') {
+        document.getElementById('btnModeMusical').classList.add('active');
+        document.getElementById('btnModeSpectral').classList.remove('active');
+        setMode('musical');
+    }
 });
 
+document.getElementById('btnModeSpectral').addEventListener('click', () => {
+    if (state.currentMode !== 'spectral') {
+        document.getElementById('btnModeSpectral').classList.add('active');
+        document.getElementById('btnModeMusical').classList.remove('active');
+        setMode('spectral');
+    }
+});
+
+// Selector de Nota Raíz (Solo en modo Musical)
+document.getElementById('selectRootNote').addEventListener('change', (e) => {
+    if (state.currentMode !== 'musical') return;
+    
+    const rootFreq = parseFloat(e.target.value);
+    const newMin = Math.round(rootFreq / 2); 
+    const newMax = Math.round(rootFreq * 4);
+
+    state.freqMin = newMin;
+    state.freqMax = newMax;
+
+    document.getElementById('paramFreqMin').value = newMin;
+    document.getElementById('paramFreqMax').value = newMax;
+    document.getElementById('valFreqMin').textContent = newMin + ' Hz';
+    document.getElementById('valFreqMax').textContent = newMax + ' Hz';
+
+    updateFrequencies();
+});
+
+// Sliders de Frecuencia (Manejo Dual)
 document.getElementById('paramFreqMin').addEventListener('input', (e) => {
     state.freqMin = parseInt(e.target.value);
     document.getElementById('valFreqMin').textContent = state.freqMin + ' Hz';
     updateFrequencies();
+    if (state.currentMode === 'musical') {
+        document.getElementById('selectRootNote').value = ""; // Indicar ajuste manual
+    }
 });
 
 document.getElementById('paramFreqMax').addEventListener('input', (e) => {
     state.freqMax = parseInt(e.target.value);
     document.getElementById('valFreqMax').textContent = state.freqMax + ' Hz';
     updateFrequencies();
+    if (state.currentMode === 'musical') {
+        document.getElementById('selectRootNote').value = ""; // Indicar ajuste manual
+    }
 });
 
+// Slider de Velocidad
+document.getElementById('paramSpeed').addEventListener('input', (e) => {
+    state.durationSec = parseFloat(e.target.value);
+    document.getElementById('valSpeed').textContent = state.durationSec.toFixed(1) + 's';
+});
+
+// Slider de Filtro
 document.getElementById('paramFilter').addEventListener('input', (e) => {
     state.filterAmount = parseInt(e.target.value) / 100;
     document.getElementById('valFilter').textContent = e.target.value + '%';
 });
 
+// Slider de Volumen Master
 document.getElementById('paramVol').addEventListener('input', (e) => {
     state.masterVolume = parseInt(e.target.value) / 100;
     document.getElementById('valVol').textContent = e.target.value + '%';

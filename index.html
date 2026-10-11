@@ -23,8 +23,8 @@
                 <label class="section-label">Modos de Escaneo</label>
                 <div class="toggles-container">
                     <label class="toggle-label">
-                        <input type="checkbox" id="toggleInvert">
-                        <span class="toggle-text">Invertir</span>
+                        <input type="checkbox" id="toggleInvert" checked>
+                        <span class="toggle-text">Trazo = Sonido</span>
                     </label>
                     <label class="toggle-label">
                         <input type="checkbox" id="toggleLoop" checked>
@@ -55,16 +55,37 @@
                 <input type="range" id="paramSpeed" min="0.5" max="10" step="0.1" value="2.0">
             </div>
 
-            <!-- SECCIÓN 3: RANGO DE FRECUENCIAS -->
+            <!-- SECCIÓN 3: RANGO DE FRECUENCIAS (CON MODO) -->
             <div class="control-section">
-                <label class="section-label">Rango de Frecuencias (Hz)</label>
+                <div class="section-header">
+                    <label class="section-label">Rango de Frecuencias</label>
+                    
+                    <!-- NUEVO: Switch de Modo -->
+                    <div class="mode-switch">
+                        <button id="btnModeMusical" class="mode-btn active">MUSICAL</button>
+                        <button id="btnModeSpectral" class="mode-btn">ESPECTRAL</button>
+                    </div>
+                </div>
+                
+                <!-- Contenedor de Nota Raíz (Solo visible en modo Musical) -->
+                <div id="rootNoteContainer" class="control-group">
+                    <label>Nota Raíz (Tonalidad)</label>
+                    <select id="selectRootNote" class="note-select">
+                        <option value="65.41">C2 (Grave)</option>
+                        <option value="130.81" selected>C3 (Medio-Grave)</option>
+                        <option value="261.63">C4 (Medio)</option>
+                        <option value="523.25">C5 (Agudo)</option>
+                        <option value="1046.50">C6 (Muy Agudo)</option>
+                    </select>
+                </div>
+
                 <div class="control-group">
-                    <label>Mín (Límite Inf) <span class="value-display" id="valFreqMin">100 Hz</span></label>
-                    <input type="range" id="paramFreqMin" min="20" max="1000" step="1" value="100">
+                    <label>Mín (Límite Inf) <span class="value-display" id="valFreqMin">65 Hz</span></label>
+                    <input type="range" id="paramFreqMin" min="20" max="1000" step="1" value="65">
                 </div>
                 <div class="control-group">
-                    <label>Máx (Límite Sup) <span class="value-display" id="valFreqMax">2000 Hz</span></label>
-                    <input type="range" id="paramFreqMax" min="200" max="8000" step="1" value="2000">
+                    <label>Máx (Límite Sup) <span class="value-display" id="valFreqMax">523 Hz</span></label>
+                    <input type="range" id="paramFreqMax" min="200" max="8000" step="1" value="523">
                 </div>
             </div>
 

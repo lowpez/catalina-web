@@ -163,3 +163,58 @@ button.secondary:hover { background: var(--accent-dim); }
     margin-top: 1rem;
     min-height: 1.2em;
 }
+
+.note-select {
+    width: 100%;
+    padding: 0.5rem;
+    background: #333;
+    color: var(--text);
+    border: 1px solid #555;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    outline: none;
+}
+.note-select:focus {
+    border-color: var(--accent);
+}
+.note-select option {
+    background: var(--panel);
+    color: var(--text);
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.mode-switch {
+    display: flex;
+    background: #111;
+    border-radius: 4px;
+    padding: 2px;
+    border: 1px solid #333;
+}
+
+.mode-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 4px 10px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.2s;
+}
+
+.mode-btn.active {
+    background: var(--accent);
+    color: #000;
+}
+
+.hidden {
+    display: none !important;
+}
