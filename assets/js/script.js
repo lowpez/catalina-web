@@ -1,5 +1,5 @@
 /**
- * CATALINA WEB - Core Engine (Fase 2 - Visualización de Bandas)
+ * CATALINA WEB - Core Engine (Fase 2 - Control Manual / Scrubber)
  * Arquitectura: Pre-procesamiento + Web Audio API + Modos de Escaneo
  * Homenaje al Catalina de Fernando von Reichenbach (1960s)
  */
@@ -24,13 +24,14 @@ const state = {
     // Modos de escaneo
     isInverted: true,
     isLooping: true,
-	isPingPong: false,
+    isPingPong: false,
     isRandom: false,
+    isScrubbing: false, // ← NUEVO: Estado de arrastre del slider
     
     // Frecuencias
     freqMin: 65,
     freqMax: 523,
-    currentMode: 'musical', // 'musical' | 'spectral'
+    currentMode: 'musical',
     
     // Procesamiento
     masterVolume: 0.8,
@@ -42,19 +43,15 @@ const canvas = document.getElementById('visualizer');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
 const playhead = document.getElementById('playhead');
 const statusText = document.getElementById('statusText');
+const scrubSlider = document.getElementById('paramScrub');
 
 // --- FUNCIÓN: DIBUJAR OVERLAY DE BANDAS ---
 function drawBandsOverlay() {
     if (!state.width || !state.height) return;
-    
     const bandHeight = state.height / CONFIG.bands;
-    
-    // Estilo sutil: color accent con 30% opacidad, líneas punteadas
     ctx.strokeStyle = 'rgba(0, 255, 157, 0.3)';
     ctx.lineWidth = 1;
     ctx.setLineDash([5, 5]);
-    
-    // Dibujar 7 líneas horizontales (crean 8 bandas)
     for (let i = 1; i < CONFIG.bands; i++) {
         const y = i * bandHeight;
         ctx.beginPath();
@@ -62,8 +59,6 @@ function drawBandsOverlay() {
         ctx.lineTo(state.width, y);
         ctx.stroke();
     }
-    
-    // Resetear dash para otros dibujos
     ctx.setLineDash([]);
 }
 
@@ -76,11 +71,9 @@ function initAudio() {
     state.oscillators = [];
     state.gainNodes = [];
     
-    // Master Gain (Volumen)
     state.masterGain = state.audioCtx.createGain();
     state.masterGain.gain.value = state.masterVolume;
     
-    // Filtro Global
     state.filter = state.audioCtx.createBiquadFilter();
     state.filter.type = 'lowpass';
     state.filter.frequency.value = 1000;
@@ -89,32 +82,24 @@ function initAudio() {
     state.filter.connect(state.masterGain);
     state.masterGain.connect(state.audioCtx.destination);
 
-    // Banco de Osciladores
     for (let i = 0; i < CONFIG.bands; i++) {
         const osc = state.audioCtx.createOscillator();
         const gain = state.audioCtx.createGain();
-        
         osc.type = 'sine';
         gain.gain.value = 0;
-        
         osc.connect(gain);
         gain.connect(state.filter);
         osc.start();
-        
         state.oscillators.push(osc);
         state.gainNodes.push(gain);
     }
-    
     updateFrequencies();
 }
 
-// Distribución logarítmica de frecuencias (más musical)
 function updateFrequencies() {
     if (!state.audioCtx) return;
     const min = state.freqMin;
     const max = state.freqMax;
-    
-    // Evitar división por cero o valores inválidos
     if (min <= 0 || max <= 0 || min >= max) return;
     
     for (let i = 0; i < CONFIG.bands; i++) {
@@ -122,6 +107,33 @@ function updateFrequencies() {
         const freq = min * Math.pow(max / min, ratio);
         state.oscillators[i].frequency.setTargetAtTime(freq, state.audioCtx.currentTime, 0.05);
     }
+}
+
+// --- NUEVA FUNCIÓN: ACTUALIZAR AUDIO DESDE PROGRESO (Reutilizable para Scrub) ---
+function updateAudioFromProgress(progress) {
+    // Determinar posición X
+    if (state.isRandom && !state.isScrubbing) {
+        state.scanX = Math.floor(Math.random() * state.width);
+    } else {
+        state.scanX = Math.floor(progress * (state.width - 1));
+    }
+
+    const colOffset = state.scanX * CONFIG.bands;
+    let totalBrightness = 0;
+    const now = state.audioCtx.currentTime;
+
+    for (let b = 0; b < CONFIG.bands; b++) {
+        let brightness = state.columnData[colOffset + b];
+        if (state.isInverted) brightness = 1 - brightness;
+        
+        totalBrightness += brightness;
+        const targetGain = brightness * 0.3;
+        state.gainNodes[b].gain.setTargetAtTime(targetGain, now, 0.02);
+    }
+
+    const avgBrightness = totalBrightness / CONFIG.bands;
+    const targetFreq = 200 + (avgBrightness * (5000 - 200) * state.filterAmount);
+    state.filter.frequency.setTargetAtTime(targetFreq, now, 0.05);
 }
 
 // --- PROCESAMIENTO DE IMAGEN ---
@@ -141,7 +153,6 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
         const imageData = ctx.getImageData(0, 0, state.width, state.height);
         const data = imageData.data;
 
-        // Pre-calcular bandas (O(1) en tiempo real)
         state.columnData = new Float32Array(state.width * CONFIG.bands);
         const bandHeight = state.height / CONFIG.bands;
 
@@ -149,7 +160,6 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
             for (let b = 0; b < CONFIG.bands; b++) {
                 let totalBrightness = 0;
                 let pixelCount = 0;
-                
                 const yStart = Math.floor(b * bandHeight);
                 const yEnd = Math.floor((b + 1) * bandHeight);
 
@@ -158,19 +168,14 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
                     const brightness = (data[idx] * 0.299 + data[idx+1] * 0.587 + data[idx+2] * 0.114) / 255;
                     totalBrightness += brightness;
                     pixelCount++;
-                    
-                    // Convertir a escala de grises visual
                     const gray = brightness * 255;
                     data[idx] = data[idx+1] = data[idx+2] = gray;
                 }
-                
                 state.columnData[x * CONFIG.bands + b] = totalBrightness / pixelCount;
             }
         }
 
         ctx.putImageData(imageData, 0, 0);
-        
-        // NUEVO: Dibujar overlay de bandas después de la imagen
         drawBandsOverlay();
         
         state.imageData = imageData;
@@ -193,6 +198,10 @@ function play() {
     state.startTime = state.audioCtx.currentTime;
     state.scanX = 0;
     
+    // Resetear scrubber al iniciar
+    scrubSlider.value = 0;
+    document.getElementById('valScrub').textContent = '0%';
+    
     document.getElementById('btnPlay').disabled = true;
     document.getElementById('btnStop').disabled = false;
     playhead.style.display = 'block';
@@ -203,6 +212,7 @@ function play() {
 
 function stop() {
     state.isPlaying = false;
+    state.isScrubbing = false; // Asegurar que se libere el scrub
     document.getElementById('btnPlay').disabled = false;
     document.getElementById('btnStop').disabled = true;
     playhead.style.display = 'none';
@@ -217,61 +227,54 @@ function stop() {
 function audioLoop() {
     if (!state.isPlaying || !state.audioCtx) return;
 
-    const elapsed = state.audioCtx.currentTime - state.startTime;
     let progress;
 
-    // Lógica de Onda Triangular (Ping-Pong) vs Onda de Sierra (Normal)
-    if (state.isPingPong) {
-        const cycleDuration = state.durationSec * 2; // Ida y vuelta
-        const rawProgress = (elapsed % cycleDuration) / state.durationSec; // Va de 0 a 2
-        progress = rawProgress <= 1 ? rawProgress : 2 - rawProgress; // Convierte a 0->1->0
-    } else {
-        progress = (elapsed % state.durationSec) / state.durationSec; // Va de 0 a 1
-    }
-
-    // Condiciones de Detención (Si el Loop está desactivado)
-    if (!state.isLooping) {
-        if (state.isPingPong) {
-            // Si es Ping-Pong sin loop, se detiene después de una ida y vuelta completa
-            if (elapsed >= state.durationSec * 2) { stop(); return; }
-        } else {
-            // Si es normal, se detiene al llegar al final
-            if (elapsed >= state.durationSec) { stop(); return; }
-        }
-    }
-
-    // Lógica de Posición (Lineal vs Aleatoria)
-    if (state.isRandom) {
-        state.scanX = Math.floor(Math.random() * state.width);
-    } else {
-        state.scanX = Math.floor(progress * (state.width - 1));
-    }
-
-    // Actualizar playhead visual (se moverá solo gracias a la variable 'progress')
-    const canvasRect = canvas.getBoundingClientRect();
-    const wrapperRect = document.getElementById('canvasWrapper').getBoundingClientRect();
-    const relativeX = (canvasRect.left - wrapperRect.left) + (progress * canvasRect.width);
-    playhead.style.left = `${relativeX}px`;
-
-    // Lectura de datos y modulación (Idéntico a antes)
-    const colOffset = state.scanX * CONFIG.bands;
-    let totalBrightness = 0;
-    const now = state.audioCtx.currentTime;
-
-    for (let b = 0; b < CONFIG.bands; b++) {
-        let brightness = state.columnData[colOffset + b];
-        if (state.isInverted) brightness = 1 - brightness;
+    if (state.isScrubbing) {
+        // MODO SCRUB: El progreso lo dicta el slider del usuario
+        const scrubValue = parseFloat(scrubSlider.value);
+        progress = scrubValue / 100;
         
-        totalBrightness += brightness;
-        const targetGain = brightness * 0.3;
-        state.gainNodes[b].gain.setTargetAtTime(targetGain, now, 0.02);
-    }
+        // Actualizar audio y visual inmediatamente
+        updateAudioFromProgress(progress);
+        
+        const canvasRect = canvas.getBoundingClientRect();
+        const wrapperRect = document.getElementById('canvasWrapper').getBoundingClientRect();
+        const relativeX = (canvasRect.left - wrapperRect.left) + (progress * canvasRect.width);
+        playhead.style.left = `${relativeX}px`;
+        
+    } else {
+        // MODO AUTOMÁTICO
+        const elapsed = state.audioCtx.currentTime - state.startTime;
+        
+        if (state.isPingPong) {
+            const cycleDuration = state.durationSec * 2;
+            const rawProgress = (elapsed % cycleDuration) / state.durationSec;
+            progress = rawProgress <= 1 ? rawProgress : 2 - rawProgress;
+        } else {
+            progress = (elapsed % state.durationSec) / state.durationSec;
+        }
 
-    const avgBrightness = totalBrightness / CONFIG.bands;
-    const minFreq = 200;
-    const maxFreq = 5000;
-    const targetFreq = minFreq + (avgBrightness * (maxFreq - minFreq) * state.filterAmount);
-    state.filter.frequency.setTargetAtTime(targetFreq, now, 0.05);
+        // Condiciones de Detención
+        if (!state.isLooping) {
+            if (state.isPingPong) {
+                if (elapsed >= state.durationSec * 2) { stop(); return; }
+            } else {
+                if (elapsed >= state.durationSec) { stop(); return; }
+            }
+        }
+
+        updateAudioFromProgress(progress);
+
+        // Actualizar playhead visual
+        const canvasRect = canvas.getBoundingClientRect();
+        const wrapperRect = document.getElementById('canvasWrapper').getBoundingClientRect();
+        const relativeX = (canvasRect.left - wrapperRect.left) + (progress * canvasRect.width);
+        playhead.style.left = `${relativeX}px`;
+
+        // Sincronizar el slider de scrub con el progreso automático
+        scrubSlider.value = progress * 100;
+        document.getElementById('valScrub').textContent = Math.round(progress * 100) + '%';
+    }
 
     requestAnimationFrame(audioLoop);
 }
@@ -295,7 +298,6 @@ async function exportWAV() {
     filter.connect(masterGain);
     masterGain.connect(offlineCtx.destination);
 
-    // Configurar frecuencias en el contexto offline
     const min = state.freqMin;
     const max = state.freqMax;
     for (let i = 0; i < CONFIG.bands; i++) {
@@ -311,7 +313,6 @@ async function exportWAV() {
         gainNodes.push(gain);
     }
 
-    // Programar eventos
     const stepTime = 0.02; 
     for (let t = 0; t < duration; t += stepTime) {
         let progress = t / duration;
@@ -339,13 +340,13 @@ async function exportWAV() {
         }
 
         const avgBrightness = totalBrightness / CONFIG.bands;
-        const minFreq = 200;
-        const maxFreq = 5000;
-        const targetFreq = minFreq + (avgBrightness * (maxFreq - minFreq) * state.filterAmount);
+        const targetFreq = 200 + (avgBrightness * (5000 - 200) * state.filterAmount);
         filter.frequency.setValueAtTime(targetFreq, t);
     }
 
     const renderedBuffer = await offlineCtx.startRendering();
+    
+    // (La función bufferToWave se mantiene igual, omitida aquí por brevedad, cópiala de tu versión anterior)
     const wavBlob = bufferToWave(renderedBuffer, renderedBuffer.length);
     const url = URL.createObjectURL(wavBlob);
     const a = document.createElement('a');
@@ -365,19 +366,11 @@ function bufferToWave(abuffer, len) {
         view = new DataView(buffer),
         channels = [], i, sample, offset = 0, pos = 0;
 
-    setUint32(0x46464952); // "RIFF"
-    setUint32(length - 8); // file length - 8
-    setUint32(0x45564157); // "WAVE"
-    setUint32(0x20746d66); // "fmt " chunk
-    setUint32(16); // length = 16
-    setUint16(1); // PCM (uncompressed)
-    setUint16(numOfChan);
-    setUint32(abuffer.sampleRate);
-    setUint32(abuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
-    setUint16(numOfChan * 2); // block-align
-    setUint16(16); // 16-bit
-    setUint32(0x61746164); // "data" - chunk
-    setUint32(length - pos - 4); // chunk length
+    // ... (Mantén exactamente el mismo código de bufferToWave que ya tenías) ...
+    setUint32(0x46464952); setUint32(length - 8); setUint32(0x45564157);
+    setUint32(0x20746d66); setUint32(16); setUint16(1); setUint16(numOfChan);
+    setUint32(abuffer.sampleRate); setUint32(abuffer.sampleRate * 2 * numOfChan);
+    setUint16(numOfChan * 2); setUint16(16); setUint32(0x61746164); setUint32(length - pos - 4);
 
     for(i = 0; i < abuffer.numberOfChannels; i++) channels.push(abuffer.getChannelData(i));
 
@@ -404,16 +397,12 @@ function setMode(mode) {
     const rootNoteContainer = document.getElementById('rootNoteContainer');
 
     if (mode === 'musical') {
-        // Modo Musical: Rango limitado, muestra la nota raíz
         rootNoteContainer.classList.remove('hidden');
         sliderMin.max = 1000;
         sliderMax.max = 8000;
-        
-        // Re-afinar automáticamente a la nota seleccionada
         document.getElementById('selectRootNote').dispatchEvent(new Event('change'));
         statusText.textContent = "Modo Musical: Escala temperada activa.";
     } else {
-        // Modo Espectral: Rango completo (20Hz - 20kHz), oculta la nota raíz
         rootNoteContainer.classList.add('hidden');
         sliderMin.max = 20000;
         sliderMax.max = 20000;
@@ -422,19 +411,15 @@ function setMode(mode) {
 }
 
 // --- EVENT LISTENERS ---
-
-// Botones principales
 document.getElementById('btnPlay').addEventListener('click', play);
 document.getElementById('btnStop').addEventListener('click', stop);
 document.getElementById('btnExport').addEventListener('click', exportWAV);
 
-// Toggles de modos de escaneo
 document.getElementById('toggleInvert').addEventListener('change', (e) => state.isInverted = e.target.checked);
 document.getElementById('toggleLoop').addEventListener('change', (e) => state.isLooping = e.target.checked);
-document.getElementById('togglePingPong').addEventListener('change', (e) => state.isPingPong = e.target.checked); 
+document.getElementById('togglePingPong').addEventListener('change', (e) => state.isPingPong = e.target.checked);
 document.getElementById('toggleRND').addEventListener('change', (e) => state.isRandom = e.target.checked);
 
-// Switch de Modo Musical/Espectral
 document.getElementById('btnModeMusical').addEventListener('click', () => {
     if (state.currentMode !== 'musical') {
         document.getElementById('btnModeMusical').classList.add('active');
@@ -451,26 +436,18 @@ document.getElementById('btnModeSpectral').addEventListener('click', () => {
     }
 });
 
-// Selector de Nota Raíz (Solo en modo Musical)
 document.getElementById('selectRootNote').addEventListener('change', (e) => {
     if (state.currentMode !== 'musical') return;
-    
     const rootFreq = parseFloat(e.target.value);
-    const newMin = Math.round(rootFreq / 2); 
-    const newMax = Math.round(rootFreq * 4);
-
-    state.freqMin = newMin;
-    state.freqMax = newMax;
-
-    document.getElementById('paramFreqMin').value = newMin;
-    document.getElementById('paramFreqMax').value = newMax;
-    document.getElementById('valFreqMin').textContent = newMin + ' Hz';
-    document.getElementById('valFreqMax').textContent = newMax + ' Hz';
-
+    state.freqMin = Math.round(rootFreq / 2); 
+    state.freqMax = Math.round(rootFreq * 4);
+    document.getElementById('paramFreqMin').value = state.freqMin;
+    document.getElementById('paramFreqMax').value = state.freqMax;
+    document.getElementById('valFreqMin').textContent = state.freqMin + ' Hz';
+    document.getElementById('valFreqMax').textContent = state.freqMax + ' Hz';
     updateFrequencies();
 });
 
-// Sliders de Frecuencia (Manejo Dual - Versión Minimalista)
 document.getElementById('paramFreqMin').addEventListener('input', (e) => {
     state.freqMin = parseInt(e.target.value);
     document.getElementById('valFreqMin').textContent = state.freqMin + ' Hz';
@@ -483,23 +460,44 @@ document.getElementById('paramFreqMax').addEventListener('input', (e) => {
     updateFrequencies();
 });
 
-// Slider de Velocidad
 document.getElementById('paramSpeed').addEventListener('input', (e) => {
     state.durationSec = parseFloat(e.target.value);
     document.getElementById('valSpeed').textContent = state.durationSec.toFixed(1) + 's';
 });
 
-// Slider de Filtro
 document.getElementById('paramFilter').addEventListener('input', (e) => {
     state.filterAmount = parseInt(e.target.value) / 100;
     document.getElementById('valFilter').textContent = e.target.value + '%';
 });
 
-// Slider de Volumen Master
 document.getElementById('paramVol').addEventListener('input', (e) => {
     state.masterVolume = parseInt(e.target.value) / 100;
     document.getElementById('valVol').textContent = e.target.value + '%';
     if (state.masterGain) {
         state.masterGain.gain.setTargetAtTime(state.masterVolume, state.audioCtx.currentTime, 0.02);
+    }
+});
+
+// --- LÓGICA DEL SCRUBBER (CONTROL MANUAL) ---
+scrubSlider.addEventListener('pointerdown', () => {
+    state.isScrubbing = true;
+});
+
+scrubSlider.addEventListener('pointerup', () => {
+    state.isScrubbing = false;
+    if (state.isPlaying) {
+        // Recalcular startTime para que el loop continúe suavemente desde la posición soltada
+        const progress = parseFloat(scrubSlider.value) / 100;
+        state.startTime = state.audioCtx.currentTime - (progress * state.durationSec);
+    }
+});
+
+// Soporte adicional para dispositivos táctiles antiguos
+scrubSlider.addEventListener('touchstart', () => { state.isScrubbing = true; }, {passive: true});
+scrubSlider.addEventListener('touchend', () => { 
+    state.isScrubbing = false; 
+    if (state.isPlaying) {
+        const progress = parseFloat(scrubSlider.value) / 100;
+        state.startTime = state.audioCtx.currentTime - (progress * state.durationSec);
     }
 });
