@@ -24,6 +24,7 @@ const state = {
     // Modos de escaneo
     isInverted: true,
     isLooping: true,
+	isPingPong: false,
     isRandom: false,
     
     // Frecuencias
@@ -217,16 +218,25 @@ function audioLoop() {
     if (!state.isPlaying || !state.audioCtx) return;
 
     const elapsed = state.audioCtx.currentTime - state.startTime;
-    let progress = elapsed / state.durationSec;
+    let progress;
 
-    // Lógica de Loop
-    if (progress >= 1) {
-        if (state.isLooping) {
-            state.startTime = state.audioCtx.currentTime;
-            progress = 0;
+    // Lógica de Onda Triangular (Ping-Pong) vs Onda de Sierra (Normal)
+    if (state.isPingPong) {
+        const cycleDuration = state.durationSec * 2; // Ida y vuelta
+        const rawProgress = (elapsed % cycleDuration) / state.durationSec; // Va de 0 a 2
+        progress = rawProgress <= 1 ? rawProgress : 2 - rawProgress; // Convierte a 0->1->0
+    } else {
+        progress = (elapsed % state.durationSec) / state.durationSec; // Va de 0 a 1
+    }
+
+    // Condiciones de Detención (Si el Loop está desactivado)
+    if (!state.isLooping) {
+        if (state.isPingPong) {
+            // Si es Ping-Pong sin loop, se detiene después de una ida y vuelta completa
+            if (elapsed >= state.durationSec * 2) { stop(); return; }
         } else {
-            stop();
-            return;
+            // Si es normal, se detiene al llegar al final
+            if (elapsed >= state.durationSec) { stop(); return; }
         }
     }
 
@@ -237,21 +247,19 @@ function audioLoop() {
         state.scanX = Math.floor(progress * (state.width - 1));
     }
 
-    // Actualizar playhead visual
+    // Actualizar playhead visual (se moverá solo gracias a la variable 'progress')
     const canvasRect = canvas.getBoundingClientRect();
     const wrapperRect = document.getElementById('canvasWrapper').getBoundingClientRect();
     const relativeX = (canvasRect.left - wrapperRect.left) + (progress * canvasRect.width);
     playhead.style.left = `${relativeX}px`;
 
-    // Lectura de datos y modulación
+    // Lectura de datos y modulación (Idéntico a antes)
     const colOffset = state.scanX * CONFIG.bands;
     let totalBrightness = 0;
     const now = state.audioCtx.currentTime;
 
     for (let b = 0; b < CONFIG.bands; b++) {
         let brightness = state.columnData[colOffset + b];
-        
-        // Lógica de Inversión (O(1) en tiempo real)
         if (state.isInverted) brightness = 1 - brightness;
         
         totalBrightness += brightness;
@@ -423,6 +431,7 @@ document.getElementById('btnExport').addEventListener('click', exportWAV);
 // Toggles de modos de escaneo
 document.getElementById('toggleInvert').addEventListener('change', (e) => state.isInverted = e.target.checked);
 document.getElementById('toggleLoop').addEventListener('change', (e) => state.isLooping = e.target.checked);
+document.getElementById('togglePingPong').addEventListener('change', (e) => state.isPingPong = e.target.checked); 
 document.getElementById('toggleRND').addEventListener('change', (e) => state.isRandom = e.target.checked);
 
 // Switch de Modo Musical/Espectral
