@@ -1,8 +1,7 @@
 /**
- * CATALINA WEB - Core Engine (Fase 3.4 - Motor Armónico con Selector de Escala)
- * Arquitectura: Pre-procesamiento + Web Audio API (Chord-Voicing Dinámico)
- * Novedad: Selector de escalas (Lydian, Mayor, Menor, Pentatónica, Pentatónica Menor)
- * Corrección: Lógica original del Lydian restaurada (sin doble suma de intervalos)
+ * CATALINA WEB - Core Engine (Fase 3.6 - Motor Armónico con Random Generativo)
+ * Arquitectura: Pre-procesamiento + Web Audio API (Chord-Voicing + Sequencer)
+ * Novedad: Modo Random transformado en secuenciador generativo con notas percusivas
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -27,6 +26,7 @@ const state = {
     isPingPong: true,
     isRandom: false,
     isScrubbing: false, 
+    lastRandomTime: 0,
     
     // Rango de frecuencias objetivo (Hz)
     freqMin: 65.41,   // C2 (~65 Hz)
@@ -46,13 +46,12 @@ const state = {
 };
 
 // --- UTILIDADES MUSICALES ---
-// Escalas disponibles: intervalos en semitonos desde la raíz
 const SCALES = {
-    lydian: [0, 2, 4, 6, 7, 9, 11],          // Mágica/etérea (default)
-    major: [0, 2, 4, 5, 7, 9, 11],           // Alegre/clásica
-    minor: [0, 2, 3, 5, 7, 8, 10],           // Melancólica/dramática
-    pentatonic: [0, 2, 4, 7, 9],             // Folk/universal (a prueba de errores)
-    pentatonicMinor: [0, 3, 5, 7, 10]        // Blues/soul
+    lydian: [0, 2, 4, 6, 7, 9, 11],
+    major: [0, 2, 4, 5, 7, 9, 11],
+    minor: [0, 2, 3, 5, 7, 8, 10],
+    pentatonic: [0, 2, 4, 7, 9],
+    pentatonicMinor: [0, 3, 5, 7, 10]
 };
 
 function midiToFreq(midiNote) {
@@ -63,10 +62,6 @@ function freqToMidi(freq) {
     return 69 + 12 * Math.log2(freq / 440);
 }
 
-/**
- * Función clave: Ajusta una nota MIDI para que caiga dentro del rango [minMidi, maxMidi]
- * mediante transposiciones de octava (+/- 12).
- */
 function clampMidiToRange(midi, minMidi, maxMidi) {
     let adjusted = midi;
     while (adjusted < minMidi) adjusted += 12;
@@ -74,63 +69,38 @@ function clampMidiToRange(midi, minMidi, maxMidi) {
     return adjusted;
 }
 
-/**
- * Genera un voicing basado en la RAÍZ, el TIPO de voicing y la ESCALA seleccionada,
- * respetando los LÍMITES de los sliders Min/Max.
- * 
- * LÓGICA CORREGIDA: Los voicingIntervals definen la estructura del acorde.
- * La escala actúa como filtro: si una nota cae fuera de la escala, se ajusta a la más cercana.
- */
 function generateChordVoicing(rootMidi, voicingType) {
     const minMidi = Math.round(freqToMidi(state.freqMin));
     const maxMidi = Math.round(freqToMidi(state.freqMax));
     
-    // LEER ESCALA SELECCIONADA (con fallback a lydian si no existe el selector)
     const scaleSelect = document.getElementById('selectScale');
     const scaleName = scaleSelect ? (scaleSelect.value || 'lydian') : 'lydian';
     const scaleIntervals = SCALES[scaleName] || SCALES.lydian;
     
-    // Definir intervalos específicos para cada textura (en semitonos desde la raíz)
-    // Estos definen la "personalidad" del acorde
     let voicingIntervals = [];
-    
     switch (voicingType) {
         case 'voice-pair':
-            // Pares paralelos: sonido coral/denso
             voicingIntervals = [0, 4, 7, 11, 12, 16, 19, 23]; 
             break;
-            
         case 'drone':
-            // Pedal grave + Melodía simple arriba
             voicingIntervals = [0, 0, 7, 12, 14, 16, 19, 21]; 
             break;
-            
         case 'open':
-            // Quintas y Octavas vacías (épico/cinematográfico)
             voicingIntervals = [0, 7, 12, 19, 24, 31, 36, 43]; 
             break;
-            
         case 'chord-melody':
         default:
-            // Acordes ricos Lydianos (Root, 5th, 3rd, 7th, 9th, 11th, Octave, 9th High)
-            // ESTOS SON LOS INTERVALOS ORIGINALES QUE TE GUSTABAN
             voicingIntervals = [0, 7, 4, 11, 14, 18, 24, 26]; 
             break;
     }
 
     const chordFreqs = [];
-    
     for (let i = 0; i < CONFIG.bands; i++) {
-        // 1. Calcular la nota teórica relativa a la raíz (LÓGICA ORIGINAL RESTAURADA)
         let rawMidi = rootMidi + voicingIntervals[i];
-        
-        // 2. CLAMPING: Forzar a que la nota esté entre MinSlider y MaxSlider
         let finalMidi = clampMidiToRange(rawMidi, minMidi, maxMidi);
         
-        // 3. FILTRO DE ESCALA: Si la nota no está en la escala elegida, ajustar a la más cercana
         const noteInScale = ((finalMidi - rootMidi) % 12 + 12) % 12;
         if (!scaleIntervals.includes(noteInScale)) {
-            // Buscar la nota más cercana en la escala
             let closestInterval = scaleIntervals[0];
             let minDistance = 12;
             for (const interval of scaleIntervals) {
@@ -140,17 +110,13 @@ function generateChordVoicing(rootMidi, voicingType) {
                     closestInterval = interval;
                 }
             }
-            // Ajustar manteniendo la octava relativa
             const octaveOffset = Math.floor((finalMidi - rootMidi) / 12) * 12;
             finalMidi = rootMidi + closestInterval + octaveOffset;
         }
         
-        // 4. Micro-detune para efecto chorus natural
         const detune = (Math.random() - 0.5) * 4; 
-        
         chordFreqs.push(midiToFreq(finalMidi) * Math.pow(2, detune / 1200));
     }
-    
     return chordFreqs;
 }
 
@@ -161,7 +127,6 @@ const playhead = document.getElementById('playhead');
 const statusText = document.getElementById('statusText');
 const scrubSlider = document.getElementById('paramScrub');
 
-// --- FUNCIÓN: DIBUJAR OVERLAY DE BANDAS ---
 function drawBandsOverlay() {
     if (!state.width || !state.height) return;
     const bandHeight = state.height / CONFIG.bands;
@@ -178,7 +143,6 @@ function drawBandsOverlay() {
     ctx.setLineDash([]);
 }
 
-// --- INICIALIZACIÓN DE AUDIO ---
 function initAudio() {
     if (state.audioCtx) return;
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -217,20 +181,15 @@ function initAudio() {
         state.oscillators.push(osc);
         state.gainNodes.push(gain);
     }
-    
     updateHarmony(0.5); 
 }
 
-// --- ACTUALIZAR ARMONÍA ---
 function updateHarmony(avgBrightness) {
     if (!state.audioCtx) return;
-    
-    // Leer Nota Raíz del HTML
     const rootSelect = document.getElementById('selectRootNote');
     const rootHz = parseFloat(rootSelect ? rootSelect.value : 261.63) || 261.63;
     const rootMidi = freqToMidi(rootHz);
     
-    // Leer Tipo de Voicing
     const voicingSelect = document.getElementById('selectVoicing');
     const voicingType = voicingSelect ? (voicingSelect.value || 'chord-melody') : 'chord-melody';
     
@@ -245,41 +204,108 @@ function updateHarmony(avgBrightness) {
     }
 }
 
-// --- ACTUALIZAR AUDIO DESDE PROGRESO ---
-function updateAudioFromProgress(progress) {
-    if (state.isRandom && !state.isScrubbing) {
-        state.scanX = Math.floor(Math.random() * state.width);
-    } else {
-        state.scanX = Math.floor(progress * (state.width - 1));
-    }
+// --- HELPERS PARA EL SEQUENCER ALEATORIO ---
 
-    const colOffset = state.scanX * CONFIG.bands;
-    let totalBrightness = 0;
-    const now = state.audioCtx.currentTime;
-    const columnValues = [];
+function playSingleNote(bandIndex, velocity, time) {
+    if (!state.audioCtx) return;
+    
+    const osc = state.audioCtx.createOscillator();
+    const gainNode = state.audioCtx.createGain();
+    
+    const freq = state.currentChordFreqs[bandIndex] || midiToFreq(60); 
+    
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, time);
+    
+    const attack = 0.02;
+    const decay = 0.3;
+    const volume = Math.pow(velocity, 1.5) * 0.4;
+    
+    gainNode.gain.setValueAtTime(0, time);
+    gainNode.gain.linearRampToValueAtTime(volume, time + attack);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, time + attack + decay);
+    
+    osc.connect(gainNode);
+    gainNode.connect(state.filter);
+    
+    osc.start(time);
+    osc.stop(time + attack + decay + 0.1);
+}
 
-    for (let b = 0; b < CONFIG.bands; b++) {
-        let brightness = state.columnData[colOffset + b];
-        if (state.isInverted) brightness = 1 - brightness;
-        columnValues.push(brightness);
-        totalBrightness += brightness;
-    }
+function forceSilenceMainOscillators(time) {
+    if (!state.oscillators.length) return;
+    state.gainNodes.forEach(g => {
+        g.gain.setTargetAtTime(0, time, 0.05);
+    });
+}
 
-    const avgBrightness = totalBrightness / CONFIG.bands;
-
-    // Actualizar Armonía Global
-    updateHarmony(avgBrightness);
-
-    // Dinámica Individual
+function restoreMainOscillators(columnValues, time) {
+    if (!state.oscillators.length) return;
     for (let b = 0; b < CONFIG.bands; b++) {
         const val = columnValues[b];
         const dynamicGain = Math.pow(val, 1.5) * 0.25;
-        state.gainNodes[b].gain.setTargetAtTime(dynamicGain, now, 0.05);
+        state.gainNodes[b].gain.setTargetAtTime(dynamicGain, time, 0.05);
     }
+}
 
-    // Modulación de Filtro
-    const cutoff = 800 + (avgBrightness * 6000 * state.filterAmount); 
-    state.filter.frequency.setTargetAtTime(cutoff, now, 0.1);
+function stopAllNotes(time) {
+    forceSilenceMainOscillators(time);
+}
+
+// --- ACTUALIZAR AUDIO DESDE PROGRESO (RANDOM GENERATIVO + NORMAL) ---
+function updateAudioFromProgress(progress) {
+    const now = state.audioCtx.currentTime;
+    
+    if (state.isRandom && !state.isScrubbing) {
+        // MODO RANDOM: Secuenciador Generativo
+        
+        if (!state.lastRandomTime || (now - state.lastRandomTime) > 0.15) {
+            const randX = Math.floor(Math.random() * state.width);
+            
+            const colOffset = randX * CONFIG.bands;
+            let maxBrightness = 0;
+            let bestBandIndex = 0;
+            
+            for (let b = 0; b < CONFIG.bands; b++) {
+                let brightness = state.columnData[colOffset + b];
+                if (state.isInverted) brightness = 1 - brightness;
+                
+                if (brightness > maxBrightness) {
+                    maxBrightness = brightness;
+                    bestBandIndex = b;
+                }
+            }
+            
+            if (maxBrightness > 0.1) {
+                playSingleNote(bestBandIndex, maxBrightness, now);
+            } else {
+                stopAllNotes(now);
+            }
+            
+            state.lastRandomTime = now;
+        }
+        
+        forceSilenceMainOscillators(now);
+
+    } else {
+        // MODO NORMAL: Escaneo Lineal Clásico
+        state.scanX = Math.floor(progress * (state.width - 1));
+        
+        const colOffset = state.scanX * CONFIG.bands;
+        let totalBrightness = 0;
+        const columnValues = [];
+
+        for (let b = 0; b < CONFIG.bands; b++) {
+            let brightness = state.columnData[colOffset + b];
+            if (state.isInverted) brightness = 1 - brightness;
+            columnValues.push(brightness);
+            totalBrightness += brightness;
+        }
+
+        const avgBrightness = totalBrightness / CONFIG.bands;
+        updateHarmony(avgBrightness);
+        restoreMainOscillators(columnValues, now);
+    }
 }
 
 // --- PROCESAMIENTO DE IMAGEN ---
@@ -343,6 +369,7 @@ function play() {
     state.isPlaying = true;
     state.startTime = state.audioCtx.currentTime;
     state.scanX = 0;
+    state.lastRandomTime = 0;
     
     scrubSlider.value = 0;
     document.getElementById('valScrub').textContent = '0%';
@@ -418,7 +445,7 @@ function audioLoop() {
     requestAnimationFrame(audioLoop);
 }
 
-// --- EXPORTACIÓN A WAV ---
+// --- EXPORTACIÓN A WAV (CON RANDOM GENERATIVO) ---
 async function exportWAV() {
     if (!state.imageData) return;
     statusText.textContent = "Renderizando pieza armónica...";
@@ -451,6 +478,7 @@ async function exportWAV() {
     const rootMidi = freqToMidi(rootHz);
     const voicingType = document.getElementById('selectVoicing') ? (document.getElementById('selectVoicing').value || 'chord-melody') : 'chord-melody';
 
+    // Preparar osciladores principales (para modo normal)
     for (let i = 0; i < CONFIG.bands; i++) {
         const osc = offlineCtx.createOscillator();
         const gain = offlineCtx.createGain();
@@ -464,43 +492,92 @@ async function exportWAV() {
         gainNodes.push(gain);
     }
 
-    const stepTime = 0.02; 
+    const stepTime = 0.02;
+    let lastRandomExportTime = 0;
+    
     for (let t = 0; t < duration; t += stepTime) {
         let progress = t / duration;
-        let x;
         
         if (state.isRandom) {
-            x = Math.floor(Math.random() * state.width);
+            // MODO RANDOM: Secuenciador generativo en exportación
+            if (t - lastRandomExportTime > 0.15) {
+                const randX = Math.floor(Math.random() * state.width);
+                const colOffset = randX * CONFIG.bands;
+                let maxBrightness = 0;
+                let bestBandIndex = 0;
+                
+                for (let b = 0; b < CONFIG.bands; b++) {
+                    let brightness = state.columnData[colOffset + b];
+                    if (state.isInverted) brightness = 1 - brightness;
+                    if (brightness > maxBrightness) {
+                        maxBrightness = brightness;
+                        bestBandIndex = b;
+                    }
+                }
+                
+                if (maxBrightness > 0.1) {
+                    // Crear oscilador temporal para esta nota
+                    const noteOsc = offlineCtx.createOscillator();
+                    const noteGain = offlineCtx.createGain();
+                    
+                    const chordFreqs = generateChordVoicing(Math.round(rootMidi), voicingType);
+                    const freq = chordFreqs[bestBandIndex] || midiToFreq(60);
+                    
+                    noteOsc.type = 'triangle';
+                    noteOsc.frequency.setValueAtTime(freq, t);
+                    
+                    const attack = 0.02;
+                    const decay = 0.3;
+                    const volume = Math.pow(maxBrightness, 1.5) * 0.4;
+                    
+                    noteGain.gain.setValueAtTime(0, t);
+                    noteGain.gain.linearRampToValueAtTime(volume, t + attack);
+                    noteGain.gain.exponentialRampToValueAtTime(0.001, t + attack + decay);
+                    
+                    noteOsc.connect(noteGain);
+                    noteGain.connect(filter);
+                    
+                    noteOsc.start(t);
+                    noteOsc.stop(t + attack + decay + 0.1);
+                }
+                
+                // Silenciar osciladores principales durante random
+                for (let b = 0; b < CONFIG.bands; b++) {
+                    gainNodes[b].gain.setValueAtTime(0, t);
+                }
+                
+                lastRandomExportTime = t;
+            }
         } else {
+            // MODO NORMAL: Escaneo lineal
+            let x;
             if (state.isLooping) progress = progress % 1;
             else progress = Math.min(progress, 1);
             x = Math.floor(progress * (state.width - 1));
+
+            const colOffset = x * CONFIG.bands;
+            let totalBrightness = 0;
+            const vals = [];
+
+            for (let b = 0; b < CONFIG.bands; b++) {
+                let brightness = state.columnData[colOffset + b];
+                if (state.isInverted) brightness = 1 - brightness;
+                vals.push(brightness);
+                totalBrightness += brightness;
+            }
+
+            const avgBrightness = totalBrightness / CONFIG.bands;
+            const chordFreqs = generateChordVoicing(Math.round(rootMidi), voicingType);
+            
+            for (let b = 0; b < CONFIG.bands; b++) {
+                oscillators[b].frequency.setValueAtTime(chordFreqs[b], t);
+                const dynGain = Math.pow(vals[b], 1.5) * 0.25;
+                gainNodes[b].gain.setValueAtTime(dynGain, t);
+            }
+
+            const cutoff = 800 + (avgBrightness * 6000 * state.filterAmount);
+            filter.frequency.setValueAtTime(cutoff, t);
         }
-
-        const colOffset = x * CONFIG.bands;
-        let totalBrightness = 0;
-        const vals = [];
-
-        for (let b = 0; b < CONFIG.bands; b++) {
-            let brightness = state.columnData[colOffset + b];
-            if (state.isInverted) brightness = 1 - brightness;
-            vals.push(brightness);
-            totalBrightness += brightness;
-        }
-
-        const avgBrightness = totalBrightness / CONFIG.bands;
-        
-        // Recalcular acorde usando la MISMA lógica robusta (incluye escala seleccionada)
-        const chordFreqs = generateChordVoicing(Math.round(rootMidi), voicingType);
-        
-        for (let b = 0; b < CONFIG.bands; b++) {
-            oscillators[b].frequency.setValueAtTime(chordFreqs[b], t);
-            const dynGain = Math.pow(vals[b], 1.5) * 0.25;
-            gainNodes[b].gain.setValueAtTime(dynGain, t);
-        }
-
-        const cutoff = 800 + (avgBrightness * 6000 * state.filterAmount);
-        filter.frequency.setValueAtTime(cutoff, t);
     }
 
     const renderedBuffer = await offlineCtx.startRendering();
@@ -613,7 +690,6 @@ if (document.getElementById('selectVoicing')) {
     });
 }
 
-// Listener para el selector de escala
 if (document.getElementById('selectScale')) {
     document.getElementById('selectScale').addEventListener('change', () => {
         const scaleSelect = document.getElementById('selectScale');
