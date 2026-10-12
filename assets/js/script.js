@@ -1,7 +1,7 @@
 /**
- * CATALINA WEB - Core Engine (Fase 3.6 - Motor Armónico con Random Generativo)
- * Arquitectura: Pre-procesamiento + Web Audio API (Chord-Voicing + Sequencer)
- * Novedad: Modo Random transformado en secuenciador generativo con notas percusivas
+ * CATALINA WEB - Core Engine (Fase 3.7 - Random Generativo Reactivo)
+ * Corrección: Los controles (Raíz, Voicing, Escala) ahora funcionan en tiempo real en modo Random.
+ * Mejora: El filtro de audio reacciona a la densidad de la imagen en modo Random.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -28,9 +28,8 @@ const state = {
     isScrubbing: false, 
     lastRandomTime: 0,
     
-    // Rango de frecuencias objetivo (Hz)
-    freqMin: 65.41,   // C2 (~65 Hz)
-    freqMax: 1046.50, // C6 (~1046 Hz)
+    freqMin: 65.41,
+    freqMax: 1046.50,
     currentMode: 'musical',
     
     masterVolume: 0.7,
@@ -79,19 +78,11 @@ function generateChordVoicing(rootMidi, voicingType) {
     
     let voicingIntervals = [];
     switch (voicingType) {
-        case 'voice-pair':
-            voicingIntervals = [0, 4, 7, 11, 12, 16, 19, 23]; 
-            break;
-        case 'drone':
-            voicingIntervals = [0, 0, 7, 12, 14, 16, 19, 21]; 
-            break;
-        case 'open':
-            voicingIntervals = [0, 7, 12, 19, 24, 31, 36, 43]; 
-            break;
+        case 'voice-pair': voicingIntervals = [0, 4, 7, 11, 12, 16, 19, 23]; break;
+        case 'drone': voicingIntervals = [0, 0, 7, 12, 14, 16, 19, 21]; break;
+        case 'open': voicingIntervals = [0, 7, 12, 19, 24, 31, 36, 43]; break;
         case 'chord-melody':
-        default:
-            voicingIntervals = [0, 7, 4, 11, 14, 18, 24, 26]; 
-            break;
+        default: voicingIntervals = [0, 7, 4, 11, 14, 18, 24, 26]; break;
     }
 
     const chordFreqs = [];
@@ -184,7 +175,8 @@ function initAudio() {
     updateHarmony(0.5); 
 }
 
-function updateHarmony(avgBrightness) {
+// --- ACTUALIZAR ARMONÍA (AHORA USADA POR AMBOS MODOS) ---
+function updateHarmony(dummyBrightness) {
     if (!state.audioCtx) return;
     const rootSelect = document.getElementById('selectRootNote');
     const rootHz = parseFloat(rootSelect ? rootSelect.value : 261.63) || 261.63;
@@ -197,6 +189,7 @@ function updateHarmony(avgBrightness) {
     state.currentChordFreqs = newFreqs;
 
     const now = state.audioCtx.currentTime;
+    // Actualizamos las frecuencias de los osciladores principales (útil para modo Normal)
     for (let i = 0; i < CONFIG.bands; i++) {
         if (newFreqs[i]) {
             state.oscillators[i].frequency.setTargetAtTime(newFreqs[i], now, 0.08);
@@ -204,11 +197,9 @@ function updateHarmony(avgBrightness) {
     }
 }
 
-// --- HELPERS PARA EL SEQUENCER ALEATORIO ---
-
+// --- HELPERS PARA EL SEQUENCER ---
 function playSingleNote(bandIndex, velocity, time) {
     if (!state.audioCtx) return;
-    
     const osc = state.audioCtx.createOscillator();
     const gainNode = state.audioCtx.createGain();
     
@@ -234,9 +225,7 @@ function playSingleNote(bandIndex, velocity, time) {
 
 function forceSilenceMainOscillators(time) {
     if (!state.oscillators.length) return;
-    state.gainNodes.forEach(g => {
-        g.gain.setTargetAtTime(0, time, 0.05);
-    });
+    state.gainNodes.forEach(g => g.gain.setTargetAtTime(0, time, 0.05));
 }
 
 function restoreMainOscillators(columnValues, time) {
@@ -248,27 +237,31 @@ function restoreMainOscillators(columnValues, time) {
     }
 }
 
-function stopAllNotes(time) {
-    forceSilenceMainOscillators(time);
-}
-
-// --- ACTUALIZAR AUDIO DESDE PROGRESO (RANDOM GENERATIVO + NORMAL) ---
+// --- ACTUALIZAR AUDIO DESDE PROGRESO (CORREGIDO) ---
 function updateAudioFromProgress(progress) {
     const now = state.audioCtx.currentTime;
     
     if (state.isRandom && !state.isScrubbing) {
-        // MODO RANDOM: Secuenciador Generativo
+        // MODO RANDOM: Secuenciador Generativo Reactivo
         
         if (!state.lastRandomTime || (now - state.lastRandomTime) > 0.15) {
-            const randX = Math.floor(Math.random() * state.width);
             
+            // 1. ACTUALIZAR ARMONÍA (Raíz, Voicing, Escala) EN TIEMPO REAL
+            updateHarmony(0.5); 
+            
+            // 2. ELEGIR POSICIÓN ALEATORIA
+            const randX = Math.floor(Math.random() * state.width);
             const colOffset = randX * CONFIG.bands;
+            
             let maxBrightness = 0;
             let bestBandIndex = 0;
+            let totalColBrightness = 0;
             
+            // 3. LEER LA COLUMNA DE LA IMAGEN
             for (let b = 0; b < CONFIG.bands; b++) {
                 let brightness = state.columnData[colOffset + b];
                 if (state.isInverted) brightness = 1 - brightness;
+                totalColBrightness += brightness;
                 
                 if (brightness > maxBrightness) {
                     maxBrightness = brightness;
@@ -276,10 +269,15 @@ function updateAudioFromProgress(progress) {
                 }
             }
             
-            if (maxBrightness > 0.1) {
+            const avgColBrightness = totalColBrightness / CONFIG.bands;
+            
+            // 4. MODULAR EL FILTRO SEGÚN LA DENSIDAD DE LA IMAGEN (¡Esto lo ata al dibujo!)
+            const cutoff = 600 + (avgColBrightness * 7000 * state.filterAmount);
+            state.filter.frequency.setTargetAtTime(cutoff, now, 0.1);
+            
+            // 5. TOCAR NOTA SI HAY CONTENIDO
+            if (avgColBrightness > 0.05) {
                 playSingleNote(bestBandIndex, maxBrightness, now);
-            } else {
-                stopAllNotes(now);
             }
             
             state.lastRandomTime = now;
@@ -303,7 +301,12 @@ function updateAudioFromProgress(progress) {
         }
 
         const avgBrightness = totalBrightness / CONFIG.bands;
+        
+        // Actualizar armonía y filtros
         updateHarmony(avgBrightness);
+        const cutoff = 800 + (avgBrightness * 6000 * state.filterAmount);
+        state.filter.frequency.setTargetAtTime(cutoff, now, 0.1);
+        
         restoreMainOscillators(columnValues, now);
     }
 }
@@ -445,7 +448,7 @@ function audioLoop() {
     requestAnimationFrame(audioLoop);
 }
 
-// --- EXPORTACIÓN A WAV (CON RANDOM GENERATIVO) ---
+// --- EXPORTACIÓN A WAV (CORREGIDA) ---
 async function exportWAV() {
     if (!state.imageData) return;
     statusText.textContent = "Renderizando pieza armónica...";
@@ -478,7 +481,6 @@ async function exportWAV() {
     const rootMidi = freqToMidi(rootHz);
     const voicingType = document.getElementById('selectVoicing') ? (document.getElementById('selectVoicing').value || 'chord-melody') : 'chord-melody';
 
-    // Preparar osciladores principales (para modo normal)
     for (let i = 0; i < CONFIG.bands; i++) {
         const osc = offlineCtx.createOscillator();
         const gain = offlineCtx.createGain();
@@ -499,28 +501,35 @@ async function exportWAV() {
         let progress = t / duration;
         
         if (state.isRandom) {
-            // MODO RANDOM: Secuenciador generativo en exportación
             if (t - lastRandomExportTime > 0.15) {
+                // Actualizar acorde para exportación
+                const chordFreqs = generateChordVoicing(Math.round(rootMidi), voicingType);
+                
                 const randX = Math.floor(Math.random() * state.width);
                 const colOffset = randX * CONFIG.bands;
                 let maxBrightness = 0;
                 let bestBandIndex = 0;
+                let totalColBrightness = 0;
                 
                 for (let b = 0; b < CONFIG.bands; b++) {
                     let brightness = state.columnData[colOffset + b];
                     if (state.isInverted) brightness = 1 - brightness;
+                    totalColBrightness += brightness;
                     if (brightness > maxBrightness) {
                         maxBrightness = brightness;
                         bestBandIndex = b;
                     }
                 }
                 
-                if (maxBrightness > 0.1) {
-                    // Crear oscilador temporal para esta nota
+                const avgColBrightness = totalColBrightness / CONFIG.bands;
+                
+                // Modulación de filtro reactiva a la imagen
+                const cutoff = 600 + (avgColBrightness * 7000 * state.filterAmount);
+                filter.frequency.setValueAtTime(cutoff, t);
+                
+                if (avgColBrightness > 0.05) {
                     const noteOsc = offlineCtx.createOscillator();
                     const noteGain = offlineCtx.createGain();
-                    
-                    const chordFreqs = generateChordVoicing(Math.round(rootMidi), voicingType);
                     const freq = chordFreqs[bestBandIndex] || midiToFreq(60);
                     
                     noteOsc.type = 'triangle';
@@ -541,7 +550,6 @@ async function exportWAV() {
                     noteOsc.stop(t + attack + decay + 0.1);
                 }
                 
-                // Silenciar osciladores principales durante random
                 for (let b = 0; b < CONFIG.bands; b++) {
                     gainNodes[b].gain.setValueAtTime(0, t);
                 }
@@ -549,7 +557,6 @@ async function exportWAV() {
                 lastRandomExportTime = t;
             }
         } else {
-            // MODO NORMAL: Escaneo lineal
             let x;
             if (state.isLooping) progress = progress % 1;
             else progress = Math.min(progress, 1);
@@ -635,21 +642,16 @@ function setMode(mode) {
         if(voicingContainer) voicingContainer.classList.remove('hidden');
         if(scaleContainer) scaleContainer.classList.remove('hidden');
         
-        sliderMin.disabled = false;
-        sliderMax.disabled = false;
-        sliderMin.parentElement.style.opacity = '1';
-        sliderMax.parentElement.style.opacity = '1';
-        
+        sliderMin.disabled = false; sliderMax.disabled = false;
+        sliderMin.parentElement.style.opacity = '1'; sliderMax.parentElement.style.opacity = '1';
         statusText.textContent = "Modo Armónico: Control Total Activado.";
     } else {
         if(rootNoteContainer) rootNoteContainer.classList.add('hidden');
         if(voicingContainer) voicingContainer.classList.add('hidden');
         if(scaleContainer) scaleContainer.classList.add('hidden');
         
-        sliderMin.disabled = false;
-        sliderMax.disabled = false;
-        sliderMin.parentElement.style.opacity = '1';
-        sliderMax.parentElement.style.opacity = '1';
+        sliderMin.disabled = false; sliderMax.disabled = false;
+        sliderMin.parentElement.style.opacity = '1'; sliderMax.parentElement.style.opacity = '1';
         statusText.textContent = "Modo Espectral: Control directo de Hz.";
     }
 }
@@ -680,21 +682,14 @@ document.getElementById('btnModeSpectral').addEventListener('click', () => {
     }
 });
 
-document.getElementById('selectRootNote').addEventListener('change', () => {
-    statusText.textContent = "Raíz armónica actualizada.";
-});
-
+document.getElementById('selectRootNote').addEventListener('change', () => { statusText.textContent = "Raíz armónica actualizada."; });
 if (document.getElementById('selectVoicing')) {
-    document.getElementById('selectVoicing').addEventListener('change', () => {
-        statusText.textContent = "Textura armónica cambiada.";
-    });
+    document.getElementById('selectVoicing').addEventListener('change', () => { statusText.textContent = "Textura armónica cambiada."; });
 }
-
 if (document.getElementById('selectScale')) {
     document.getElementById('selectScale').addEventListener('change', () => {
         const scaleSelect = document.getElementById('selectScale');
-        const scaleName = scaleSelect.options[scaleSelect.selectedIndex].text;
-        statusText.textContent = `Escala cambiada a: ${scaleName}`;
+        statusText.textContent = `Escala cambiada a: ${scaleSelect.options[scaleSelect.selectedIndex].text}`;
     });
 }
 
@@ -702,22 +697,18 @@ document.getElementById('paramFreqMin').addEventListener('input', (e) => {
     state.freqMin = parseInt(e.target.value);
     document.getElementById('valFreqMin').textContent = state.freqMin + ' Hz';
 });
-
 document.getElementById('paramFreqMax').addEventListener('input', (e) => {
     state.freqMax = parseInt(e.target.value);
     document.getElementById('valFreqMax').textContent = state.freqMax + ' Hz';
 });
-
 document.getElementById('paramSpeed').addEventListener('input', (e) => {
     state.durationSec = parseFloat(e.target.value);
     document.getElementById('valSpeed').textContent = state.durationSec.toFixed(1) + 's';
 });
-
 document.getElementById('paramFilter').addEventListener('input', (e) => {
     state.filterAmount = parseInt(e.target.value) / 100;
     document.getElementById('valFilter').textContent = e.target.value + '%';
 });
-
 document.getElementById('paramVol').addEventListener('input', (e) => {
     state.masterVolume = parseInt(e.target.value) / 100;
     document.getElementById('valVol').textContent = e.target.value + '%';
@@ -726,7 +717,6 @@ document.getElementById('paramVol').addEventListener('input', (e) => {
     }
 });
 
-// --- LÓGICA DEL SCRUBBER ---
 scrubSlider.addEventListener('pointerdown', () => { state.isScrubbing = true; });
 scrubSlider.addEventListener('pointerup', () => { 
     state.isScrubbing = false; 
