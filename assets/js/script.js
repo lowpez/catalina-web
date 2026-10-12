@@ -1,7 +1,8 @@
 /**
- * CATALINA WEB - Core Engine (Fase 3.3 - Motor Armónico Robusto)
- * Corrección Crítica: Sliders Min/Max actúan como Clamps dinámicos.
- * La Nota Raíz desplaza el eje central del acorde.
+ * CATALINA WEB - Core Engine (Fase 3.4 - Motor Armónico con Selector de Escala)
+ * Arquitectura: Pre-procesamiento + Web Audio API (Chord-Voicing Dinámico)
+ * Novedad: Selector de escalas (Lydian, Mayor, Menor, Pentatónica, Pentatónica Menor)
+ * Corrección: Lógica original del Lydian restaurada (sin doble suma de intervalos)
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -45,10 +46,13 @@ const state = {
 };
 
 // --- UTILIDADES MUSICALES ---
+// Escalas disponibles: intervalos en semitonos desde la raíz
 const SCALES = {
-    major: [0, 2, 4, 5, 7, 9, 11],
-    minor: [0, 2, 3, 5, 7, 8, 10],
-    lydian: [0, 2, 4, 6, 7, 9, 11]
+    lydian: [0, 2, 4, 6, 7, 9, 11],          // Mágica/etérea (default)
+    major: [0, 2, 4, 5, 7, 9, 11],           // Alegre/clásica
+    minor: [0, 2, 3, 5, 7, 8, 10],           // Melancólica/dramática
+    pentatonic: [0, 2, 4, 7, 9],             // Folk/universal (a prueba de errores)
+    pentatonicMinor: [0, 3, 5, 7, 10]        // Blues/soul
 };
 
 function midiToFreq(midiNote) {
@@ -65,59 +69,83 @@ function freqToMidi(freq) {
  */
 function clampMidiToRange(midi, minMidi, maxMidi) {
     let adjusted = midi;
-    // Mientras esté fuera de rango, ajustamos
     while (adjusted < minMidi) adjusted += 12;
     while (adjusted > maxMidi) adjusted -= 12;
     return adjusted;
 }
 
-// Genera un voicing basado en la RAÍZ y el TIPO, respetando los LÍMITES SLIDERS
+/**
+ * Genera un voicing basado en la RAÍZ, el TIPO de voicing y la ESCALA seleccionada,
+ * respetando los LÍMITES de los sliders Min/Max.
+ * 
+ * LÓGICA CORREGIDA: Los voicingIntervals definen la estructura del acorde.
+ * La escala actúa como filtro: si una nota cae fuera de la escala, se ajusta a la más cercana.
+ */
 function generateChordVoicing(rootMidi, voicingType) {
     const minMidi = Math.round(freqToMidi(state.freqMin));
     const maxMidi = Math.round(freqToMidi(state.freqMax));
     
+    // LEER ESCALA SELECCIONADA (con fallback a lydian si no existe el selector)
+    const scaleSelect = document.getElementById('selectScale');
+    const scaleName = scaleSelect ? (scaleSelect.value || 'lydian') : 'lydian';
+    const scaleIntervals = SCALES[scaleName] || SCALES.lydian;
+    
     // Definir intervalos específicos para cada textura (en semitonos desde la raíz)
-    // Estos números definen la "personalidad" del acorde
-    let intervals = [];
+    // Estos definen la "personalidad" del acorde
+    let voicingIntervals = [];
     
     switch (voicingType) {
         case 'voice-pair':
-            // Pares paralelos: Raíz+3ra, 5ta+7ma... (Sonido coral/denso)
-            // Usamos indices bajos para mantener cohesión, luego clamped
-            intervals = [0, 4, 7, 11, 12, 16, 19, 23]; 
+            // Pares paralelos: sonido coral/denso
+            voicingIntervals = [0, 4, 7, 11, 12, 16, 19, 23]; 
             break;
             
         case 'drone':
             // Pedal grave + Melodía simple arriba
-            // Dos primeras notas muy juntas/graves, resto disperso
-            intervals = [0, 0, 7, 12, 14, 16, 19, 21]; 
+            voicingIntervals = [0, 0, 7, 12, 14, 16, 19, 21]; 
             break;
             
         case 'open':
-            // Quintas y Octavas vacías (Sonido épico/cinematográfico)
-            intervals = [0, 7, 12, 19, 24, 31, 36, 43]; 
+            // Quintas y Octavas vacías (épico/cinematográfico)
+            voicingIntervals = [0, 7, 12, 19, 24, 31, 36, 43]; 
             break;
             
         case 'chord-melody':
         default:
-            // Acordes ricos Lydianos (Tu favorito original)
-            // Root, 5th, 3rd, 7th, 9th, 11th, Octave, 9th High
-            intervals = [0, 7, 4, 11, 14, 18, 24, 26]; 
+            // Acordes ricos Lydianos (Root, 5th, 3rd, 7th, 9th, 11th, Octave, 9th High)
+            // ESTOS SON LOS INTERVALOS ORIGINALES QUE TE GUSTABAN
+            voicingIntervals = [0, 7, 4, 11, 14, 18, 24, 26]; 
             break;
     }
 
     const chordFreqs = [];
     
     for (let i = 0; i < CONFIG.bands; i++) {
-        // 1. Calcular la nota teórica relativa a la raíz seleccionada
-        const rawMidi = rootMidi + intervals[i];
+        // 1. Calcular la nota teórica relativa a la raíz (LÓGICA ORIGINAL RESTAURADA)
+        let rawMidi = rootMidi + voicingIntervals[i];
         
         // 2. CLAMPING: Forzar a que la nota esté entre MinSlider y MaxSlider
-        // Esto hace que si mueves el slider MAX hacia arriba, las notas agudas aparezcan.
-        // Si mueves MIN hacia abajo, las notas graves aparecen.
-        const finalMidi = clampMidiToRange(rawMidi, minMidi, maxMidi);
+        let finalMidi = clampMidiToRange(rawMidi, minMidi, maxMidi);
         
-        // 3. Micro-detune para efecto chorus natural
+        // 3. FILTRO DE ESCALA: Si la nota no está en la escala elegida, ajustar a la más cercana
+        const noteInScale = ((finalMidi - rootMidi) % 12 + 12) % 12;
+        if (!scaleIntervals.includes(noteInScale)) {
+            // Buscar la nota más cercana en la escala
+            let closestInterval = scaleIntervals[0];
+            let minDistance = 12;
+            for (const interval of scaleIntervals) {
+                const distance = Math.abs(noteInScale - interval);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestInterval = interval;
+                }
+            }
+            // Ajustar manteniendo la octava relativa
+            const octaveOffset = Math.floor((finalMidi - rootMidi) / 12) * 12;
+            finalMidi = rootMidi + closestInterval + octaveOffset;
+        }
+        
+        // 4. Micro-detune para efecto chorus natural
         const detune = (Math.random() - 0.5) * 4; 
         
         chordFreqs.push(midiToFreq(finalMidi) * Math.pow(2, detune / 1200));
@@ -204,7 +232,7 @@ function updateHarmony(avgBrightness) {
     
     // Leer Tipo de Voicing
     const voicingSelect = document.getElementById('selectVoicing');
-    const voicingType = voicingSelect ? voicingSelect.value : 'chord-melody';
+    const voicingType = voicingSelect ? (voicingSelect.value || 'chord-melody') : 'chord-melody';
     
     const newFreqs = generateChordVoicing(Math.round(rootMidi), voicingType);
     state.currentChordFreqs = newFreqs;
@@ -212,7 +240,6 @@ function updateHarmony(avgBrightness) {
     const now = state.audioCtx.currentTime;
     for (let i = 0; i < CONFIG.bands; i++) {
         if (newFreqs[i]) {
-            // Transición suave
             state.oscillators[i].frequency.setTargetAtTime(newFreqs[i], now, 0.08);
         }
     }
@@ -422,7 +449,7 @@ async function exportWAV() {
 
     const rootHz = parseFloat(document.getElementById('selectRootNote').value) || 261.63;
     const rootMidi = freqToMidi(rootHz);
-    const voicingType = document.getElementById('selectVoicing').value || 'chord-melody';
+    const voicingType = document.getElementById('selectVoicing') ? (document.getElementById('selectVoicing').value || 'chord-melody') : 'chord-melody';
 
     for (let i = 0; i < CONFIG.bands; i++) {
         const osc = offlineCtx.createOscillator();
@@ -463,7 +490,7 @@ async function exportWAV() {
 
         const avgBrightness = totalBrightness / CONFIG.bands;
         
-        // Recalcular acorde usando la MISMA lógica robusta
+        // Recalcular acorde usando la MISMA lógica robusta (incluye escala seleccionada)
         const chordFreqs = generateChordVoicing(Math.round(rootMidi), voicingType);
         
         for (let b = 0; b < CONFIG.bands; b++) {
@@ -523,11 +550,13 @@ function setMode(mode) {
     const sliderMin = document.getElementById('paramFreqMin');
     const sliderMax = document.getElementById('paramFreqMax');
     const rootNoteContainer = document.getElementById('rootNoteContainer');
-    const voicingContainer = document.getElementById('voicingContainer'); // Asegúrate de tener este ID en HTML
+    const voicingContainer = document.getElementById('voicingContainer');
+    const scaleContainer = document.getElementById('scaleContainer');
 
     if (mode === 'musical') {
         if(rootNoteContainer) rootNoteContainer.classList.remove('hidden');
         if(voicingContainer) voicingContainer.classList.remove('hidden');
+        if(scaleContainer) scaleContainer.classList.remove('hidden');
         
         sliderMin.disabled = false;
         sliderMax.disabled = false;
@@ -538,6 +567,7 @@ function setMode(mode) {
     } else {
         if(rootNoteContainer) rootNoteContainer.classList.add('hidden');
         if(voicingContainer) voicingContainer.classList.add('hidden');
+        if(scaleContainer) scaleContainer.classList.add('hidden');
         
         sliderMin.disabled = false;
         sliderMax.disabled = false;
@@ -580,6 +610,15 @@ document.getElementById('selectRootNote').addEventListener('change', () => {
 if (document.getElementById('selectVoicing')) {
     document.getElementById('selectVoicing').addEventListener('change', () => {
         statusText.textContent = "Textura armónica cambiada.";
+    });
+}
+
+// Listener para el selector de escala
+if (document.getElementById('selectScale')) {
+    document.getElementById('selectScale').addEventListener('change', () => {
+        const scaleSelect = document.getElementById('selectScale');
+        const scaleName = scaleSelect.options[scaleSelect.selectedIndex].text;
+        statusText.textContent = `Escala cambiada a: ${scaleName}`;
     });
 }
 
