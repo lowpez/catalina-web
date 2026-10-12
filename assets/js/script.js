@@ -1,14 +1,13 @@
 /**
- * CATALINA WEB - Core Engine (Fase 3 - Motor Armónico Estilo Laurie Spiegel)
- * Arquitectura: Pre-procesamiento + Web Audio API (Chord-Voicing) + Modos de Escaneo
- * Objetivo: Sonoridad musical, cálida y compleja (Music Mouse vibe)
+ * CATALINA WEB - Core Engine (Fase 3.3 - Motor Armónico Robusto)
+ * Corrección Crítica: Sliders Min/Max actúan como Clamps dinámicos.
+ * La Nota Raíz desplaza el eje central del acorde.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
 const CONFIG = {
-    bands: 8, // Número de voces polifónicas
-    sampleRate: 44100,
-    scaleType: 'major', // 'major', 'minor', 'lydian'
+    bands: 8,
+    sampleRate: 44100
 };
 
 const state = {
@@ -22,106 +21,106 @@ const state = {
     width: 0,
     height: 0,
     
-    // Modos de escaneo
     isInverted: true,
     isLooping: true,
     isPingPong: false,
     isRandom: false,
     isScrubbing: false, 
     
-    // Frecuencias Base
-    rootFreq: 261.63, // Do Central (C4) por defecto
-    freqMin: 65,      // Se usará como referencia visual, no directa para síntesis ahora
-    freqMax: 523,     
+    // Rango de frecuencias objetivo (Hz)
+    freqMin: 65.41,   // C2 (~65 Hz)
+    freqMax: 1046.50, // C6 (~1046 Hz)
     currentMode: 'musical',
     
-    // Procesamiento
     masterVolume: 0.7,
     filterAmount: 0.5,
     
-    // Nodos de Audio
     oscillators: [],
     gainNodes: [],
     masterGain: null,
     filter: null,
     lfo: null,
     lfoGain: null,
-    
-    // Datos Armónicos Calculados
     currentChordFreqs: [] 
 };
 
 // --- UTILIDADES MUSICALES ---
-// Semitonios desde la raíz para escalas comunes
 const SCALES = {
     major: [0, 2, 4, 5, 7, 9, 11],
     minor: [0, 2, 3, 5, 7, 8, 10],
-    lydian: [0, 2, 4, 6, 7, 9, 11], // Muy usada en electrónica ambiental/spiegeliana
-    mixolydian: [0, 2, 4, 5, 7, 9, 10]
+    lydian: [0, 2, 4, 6, 7, 9, 11]
 };
 
 function midiToFreq(midiNote) {
     return 440 * Math.pow(2, (midiNote - 69) / 12);
 }
 
-function getScaleNotes(rootMidi, scaleName, count) {
-    const intervals = SCALES[scaleName] || SCALES.major;
-    const notes = [];
-    for (let i = 0; i < count; i++) {
-        // Ciclo a través de la escala, subiendo octava cuando se acaba
-        const intervalIndex = i % intervals.length;
-        const octaveOffset = Math.floor(i / intervals.length) * 12;
-        notes.push(rootMidi + intervals[intervalIndex] + octaveOffset);
-    }
-    return notes.map(n => midiToFreq(n));
+function freqToMidi(freq) {
+    return 69 + 12 * Math.log2(freq / 440);
 }
 
-// Genera un voicing de acorde rico distribuyendo notas en las 8 voces
-function generateChordVoicing(rootMidi, brightnessFactor, complexitySeed) {
-    // Elegir qué tipo de acorde según la "brillantez" o semilla
-    // Simulamos diferentes estructuras armónicas
-    
-    const scaleName = 'lydian'; // Lydian suena mágica y abierta, ideal para esto
-    const baseNotes = getScaleNotes(rootMidi, scaleName, 7); // 7 notas de la escala
-    
-    let chordFreqs = [];
-    
-    // Estrategia de Voicing:
-    // Voces bajas (0-2): Raíz y Quinta (fundamento sólido)
-    // Voces medias (3-5): Tercera y Séptima (color armónico)
-    // Voces altas (6-7): Novena y Undécima/Dodécima (aire y brillo)
-    
-    // Aplicamos variación basada en la luminosidad de la imagen (brightnessFactor)
-    // Si es oscuro -> Acorde cerrado/tradicional. Si es claro -> Acorde abierto/suspendido.
-    
-    const spread = 12 * brightnessFactor; // Octavas extra si hay mucha luz/negro
-    
-    // Mapeo manual para asegurar consonancia (evitar clusters disonantes feos)
-    // Índices de la escala: 0(Raíz), 2(Tercera), 4(Quinta), 6(Séptima), 8(Novena)...
-    
-    const voiceIndices = [
-        0, // Root
-        4, // Fifth
-        2, // Third
-        6, // Seventh
-        8, // Ninth
-        10,// Eleventh/Twelfth
-        12,// Octave Root
-        14 // Ninth High
-    ];
+/**
+ * Función clave: Ajusta una nota MIDI para que caiga dentro del rango [minMidi, maxMidi]
+ * mediante transposiciones de octava (+/- 12).
+ */
+function clampMidiToRange(midi, minMidi, maxMidi) {
+    let adjusted = midi;
+    // Mientras esté fuera de rango, ajustamos
+    while (adjusted < minMidi) adjusted += 12;
+    while (adjusted > maxMidi) adjusted -= 12;
+    return adjusted;
+}
 
+// Genera un voicing basado en la RAÍZ y el TIPO, respetando los LÍMITES SLIDERS
+function generateChordVoicing(rootMidi, voicingType) {
+    const minMidi = Math.round(freqToMidi(state.freqMin));
+    const maxMidi = Math.round(freqToMidi(state.freqMax));
+    
+    // Definir intervalos específicos para cada textura (en semitonos desde la raíz)
+    // Estos números definen la "personalidad" del acorde
+    let intervals = [];
+    
+    switch (voicingType) {
+        case 'voice-pair':
+            // Pares paralelos: Raíz+3ra, 5ta+7ma... (Sonido coral/denso)
+            // Usamos indices bajos para mantener cohesión, luego clamped
+            intervals = [0, 4, 7, 11, 12, 16, 19, 23]; 
+            break;
+            
+        case 'drone':
+            // Pedal grave + Melodía simple arriba
+            // Dos primeras notas muy juntas/graves, resto disperso
+            intervals = [0, 0, 7, 12, 14, 16, 19, 21]; 
+            break;
+            
+        case 'open':
+            // Quintas y Octavas vacías (Sonido épico/cinematográfico)
+            intervals = [0, 7, 12, 19, 24, 31, 36, 43]; 
+            break;
+            
+        case 'chord-melody':
+        default:
+            // Acordes ricos Lydianos (Tu favorito original)
+            // Root, 5th, 3rd, 7th, 9th, 11th, Octave, 9th High
+            intervals = [0, 7, 4, 11, 14, 18, 24, 26]; 
+            break;
+    }
+
+    const chordFreqs = [];
+    
     for (let i = 0; i < CONFIG.bands; i++) {
-        const idx = voiceIndices[i];
-        // Obtener frecuencia de la escala extendida
-        const noteInterval = idx >= 7 ? (idx % 7) : idx;
-        const octaveAdd = Math.floor(idx / 7) * 12;
+        // 1. Calcular la nota teórica relativa a la raíz seleccionada
+        const rawMidi = rootMidi + intervals[i];
         
-        const rawFreq = midiToFreq(rootMidi + SCALES[scaleName][noteInterval] + octaveAdd);
+        // 2. CLAMPING: Forzar a que la nota esté entre MinSlider y MaxSlider
+        // Esto hace que si mueves el slider MAX hacia arriba, las notas agudas aparezcan.
+        // Si mueves MIN hacia abajo, las notas graves aparecen.
+        const finalMidi = clampMidiToRange(rawMidi, minMidi, maxMidi);
         
-        // Añadir micro-desafinación sutil (chorus effect natural)
-        const detune = (Math.random() - 0.5) * 5; // +/- 2.5 cents
+        // 3. Micro-detune para efecto chorus natural
+        const detune = (Math.random() - 0.5) * 4; 
         
-        chordFreqs.push(rawFreq * Math.pow(2, detune/1200));
+        chordFreqs.push(midiToFreq(finalMidi) * Math.pow(2, detune / 1200));
     }
     
     return chordFreqs;
@@ -138,7 +137,7 @@ const scrubSlider = document.getElementById('paramScrub');
 function drawBandsOverlay() {
     if (!state.width || !state.height) return;
     const bandHeight = state.height / CONFIG.bands;
-    ctx.strokeStyle = 'rgba(0, 255, 157, 0.3)'; // Más sutil
+    ctx.strokeStyle = 'rgba(0, 255, 157, 0.3)';
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     for (let i = 1; i < CONFIG.bands; i++) {
@@ -151,7 +150,7 @@ function drawBandsOverlay() {
     ctx.setLineDash([]);
 }
 
-// --- INICIALIZACIÓN DE AUDIO (ESTILO SPEIGEL) ---
+// --- INICIALIZACIÓN DE AUDIO ---
 function initAudio() {
     if (state.audioCtx) return;
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -160,82 +159,61 @@ function initAudio() {
     state.oscillators = [];
     state.gainNodes = [];
     
-    // 1. MASTER GAIN
     state.masterGain = state.audioCtx.createGain();
     state.masterGain.gain.value = state.masterVolume;
     
-    // 2. FILTRO SUAVE (Lowpass genérico para calidez)
     state.filter = state.audioCtx.createBiquadFilter();
     state.filter.type = 'lowpass';
-    state.filter.frequency.value = 4000; // Abierto por defecto
-    state.filter.Q.value = 0.7;          // Resonancia casi nula (limpio)
+    state.filter.frequency.value = 4000;
+    state.filter.Q.value = 0.7;
     
     state.filter.connect(state.masterGain);
     state.masterGain.connect(state.audioCtx.destination);
 
-    // 3. LFO PARA CHORUS/VIBRATO SUTIL
     state.lfo = state.audioCtx.createOscillator();
     state.lfoGain = state.audioCtx.createGain();
-    state.lfo.frequency.value = 0.5;     // Muy lento (ondulación etérea)
-    state.lfoGain.gain.value = 1.5;      // Desviación mínima
+    state.lfo.frequency.value = 0.5;
+    state.lfoGain.gain.value = 1.5;
     state.lfo.connect(state.lfoGain);
     state.lfo.start();
 
     for (let i = 0; i < CONFIG.bands; i++) {
         const osc = state.audioCtx.createOscillator();
         const gain = state.audioCtx.createGain();
-        
-        // TRIANGLE WAVE: Suave, redondo, con armónicos pares/impar equilibrados.
-        // Ideal para pads y melodías líricas.
         osc.type = 'triangle'; 
-        
         gain.gain.value = 0;
-        
-        // Conectar LFO para dar vida
-        state.lfoGain.connect(osc.detune); // Modulamos DETUNE, no FREQUENCY, para chorus
-        
+        state.lfoGain.connect(osc.detune);
         osc.connect(gain);
         gain.connect(state.filter);
         osc.start();
-        
         state.oscillators.push(osc);
         state.gainNodes.push(gain);
     }
     
-    // Inicializar primer acorde
     updateHarmony(0.5); 
 }
 
-// --- ACTUALIZAR ARMONÍA (NUEVO CORE LOGIC) ---
+// --- ACTUALIZAR ARMONÍA ---
 function updateHarmony(avgBrightness) {
     if (!state.audioCtx) return;
     
-    // Convertir Root Note selector value a MIDI
-    // Asumimos que selectRootNote da Hz, convertimos a MIDI aprox para cálculo interno
-    // O mejor, guardamos el MIDI directamente en estado si cambiamos el UI luego.
-    // Por ahora, asumemos C4 (261.63Hz) ~ MIDI 60.
+    // Leer Nota Raíz del HTML
+    const rootSelect = document.getElementById('selectRootNote');
+    const rootHz = parseFloat(rootSelect ? rootSelect.value : 261.63) || 261.63;
+    const rootMidi = freqToMidi(rootHz);
     
-    // Para simplificar, usamos la frecuencia raíz definida en HTML o default
-    const rootHz = parseFloat(document.getElementById('selectRootNote').value) || 261.63;
-    const rootMidi = 69 + 12 * Math.log2(rootHz / 440);
+    // Leer Tipo de Voicing
+    const voicingSelect = document.getElementById('selectVoicing');
+    const voicingType = voicingSelect ? voicingSelect.value : 'chord-melody';
     
-    // Generar nuevas frecuencias basadas en la luminosidad promedio
-    // avgBrightness 0..1 determina qué tan "abierto" o complejo es el acorde
-    const newFreqs = generateChordVoicing(Math.round(rootMidi), avgBrightness, Date.now());
-    
+    const newFreqs = generateChordVoicing(Math.round(rootMidi), voicingType);
     state.currentChordFreqs = newFreqs;
 
     const now = state.audioCtx.currentTime;
-    
-    // Asignar frecuencias a los osciladores con transición suave
     for (let i = 0; i < CONFIG.bands; i++) {
         if (newFreqs[i]) {
-            // setTargetAtTime evita clicks al cambiar de acorde
-            state.oscillators[i].frequency.setTargetAtTime(newFreqs[i], now, 0.1);
-            
-            // Volumen individual basado en registro (voces graves un poco más fuertes para balance)
-            const volumeCompensation = i < 3 ? 0.15 : 0.10; 
-            // El volumen real lo controla updateAudioFromProgress, aquí solo preparamos la base
+            // Transición suave
+            state.oscillators[i].frequency.setTargetAtTime(newFreqs[i], now, 0.08);
         }
     }
 }
@@ -251,9 +229,8 @@ function updateAudioFromProgress(progress) {
     const colOffset = state.scanX * CONFIG.bands;
     let totalBrightness = 0;
     const now = state.audioCtx.currentTime;
-
-    // 1. Leer datos de la columna
     const columnValues = [];
+
     for (let b = 0; b < CONFIG.bands; b++) {
         let brightness = state.columnData[colOffset + b];
         if (state.isInverted) brightness = 1 - brightness;
@@ -263,30 +240,22 @@ function updateAudioFromProgress(progress) {
 
     const avgBrightness = totalBrightness / CONFIG.bands;
 
-    // 2. Actualizar Armonía Global (El acorde cambia suavemente según la densidad de la imagen)
-    // Solo actualizar si ha pasado tiempo suficiente o si el cambio es significativo para ahorrar CPU
-    // Pero para efecto Spiegel, queremos fluidez continua.
+    // Actualizar Armonía Global
     updateHarmony(avgBrightness);
 
-    // 3. Dinámica Individual (Attack/Decay por voz)
+    // Dinámica Individual
     for (let b = 0; b < CONFIG.bands; b++) {
         const val = columnValues[b];
-        
-        // Curva exponencial para dinámica más musical (no lineal robótica)
-        // x^2 hace que los valores bajos sean silenciosos y los altos exploten suavemente
-        const dynamicGain = Math.pow(val, 1.5) * 0.25; 
-        
-        // Ataque rápido, decay medio
+        const dynamicGain = Math.pow(val, 1.5) * 0.25;
         state.gainNodes[b].gain.setTargetAtTime(dynamicGain, now, 0.05);
     }
 
-    // 4. Modulación de Filtro (Brillo general)
-    // Cuanto más negro/promedio alto, más abrimos el filtro para dejar pasar armónicos agudos
-    const cutoff = 800 + (avgBrightness * 6000); 
+    // Modulación de Filtro
+    const cutoff = 800 + (avgBrightness * 6000 * state.filterAmount); 
     state.filter.frequency.setTargetAtTime(cutoff, now, 0.1);
 }
 
-// --- PROCESAMIENTO DE IMAGEN (Sin cambios mayores, solo limpieza) ---
+// --- PROCESAMIENTO DE IMAGEN ---
 document.getElementById('imageInput').addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -338,7 +307,7 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
     img.src = URL.createObjectURL(file);
 });
 
-// --- MOTOR DE REPRODUCCIÓN (Igual que antes) ---
+// --- MOTOR DE REPRODUCCIÓN ---
 function play() {
     if (!state.imageData) return;
     initAudio();
@@ -422,7 +391,7 @@ function audioLoop() {
     requestAnimationFrame(audioLoop);
 }
 
-// --- EXPORTACIÓN A WAV (Adaptada al nuevo motor) ---
+// --- EXPORTACIÓN A WAV ---
 async function exportWAV() {
     if (!state.imageData) return;
     statusText.textContent = "Renderizando pieza armónica...";
@@ -434,7 +403,6 @@ async function exportWAV() {
     const oscillators = [];
     const gainNodes = [];
     
-    // Cadena de efectos idéntica a Live
     const filter = offlineCtx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.Q.value = 0.7;
@@ -452,9 +420,9 @@ async function exportWAV() {
     lfo.connect(lfoGain);
     lfo.start(0);
 
-    // Preparar raíces
     const rootHz = parseFloat(document.getElementById('selectRootNote').value) || 261.63;
-    const rootMidi = 69 + 12 * Math.log2(rootHz / 440);
+    const rootMidi = freqToMidi(rootHz);
+    const voicingType = document.getElementById('selectVoicing').value || 'chord-melody';
 
     for (let i = 0; i < CONFIG.bands; i++) {
         const osc = offlineCtx.createOscillator();
@@ -495,8 +463,8 @@ async function exportWAV() {
 
         const avgBrightness = totalBrightness / CONFIG.bands;
         
-        // Recalcular acorde para este frame exacto
-        const chordFreqs = generateChordVoicing(Math.round(rootMidi), avgBrightness, t);
+        // Recalcular acorde usando la MISMA lógica robusta
+        const chordFreqs = generateChordVoicing(Math.round(rootMidi), voicingType);
         
         for (let b = 0; b < CONFIG.bands; b++) {
             oscillators[b].frequency.setValueAtTime(chordFreqs[b], t);
@@ -504,7 +472,7 @@ async function exportWAV() {
             gainNodes[b].gain.setValueAtTime(dynGain, t);
         }
 
-        const cutoff = 800 + (avgBrightness * 6000);
+        const cutoff = 800 + (avgBrightness * 6000 * state.filterAmount);
         filter.frequency.setValueAtTime(cutoff, t);
     }
 
@@ -520,7 +488,6 @@ async function exportWAV() {
     document.getElementById('btnExport').disabled = false;
 }
 
-// Función auxiliar WAV (Mantener igual)
 function bufferToWave(abuffer, len) {
     let numOfChan = abuffer.numberOfChannels,
         length = len * numOfChan * 2 + 44,
@@ -550,38 +517,37 @@ function bufferToWave(abuffer, len) {
     function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
 }
 
-// --- GESTIÓN DE MODOS (Actualizada para reflejar cambio conceptual) ---
+// --- GESTIÓN DE MODOS ---
 function setMode(mode) {
     state.currentMode = mode;
     const sliderMin = document.getElementById('paramFreqMin');
     const sliderMax = document.getElementById('paramFreqMax');
     const rootNoteContainer = document.getElementById('rootNoteContainer');
+    const voicingContainer = document.getElementById('voicingContainer'); // Asegúrate de tener este ID en HTML
 
     if (mode === 'musical') {
-        rootNoteContainer.classList.remove('hidden');
-        // En modo armónico, los sliders de Min/Max Hz ya no controlan directamente las voces
-        // sino que podríamos repurpurlos para "Spread" o "Density" en el futuro.
-        // Por ahora, los ocultamos o deshabilitamos visualmente si quieres, 
-        // pero mantendré la estructura para no romper tu HTML.
-        sliderMin.disabled = true;
-        sliderMax.disabled = true;
-        sliderMin.parentElement.style.opacity = '0.5';
-        sliderMax.parentElement.style.opacity = '0.5';
+        if(rootNoteContainer) rootNoteContainer.classList.remove('hidden');
+        if(voicingContainer) voicingContainer.classList.remove('hidden');
         
-        statusText.textContent = "Modo Armónico: Acordes Diatónicos Activos.";
+        sliderMin.disabled = false;
+        sliderMax.disabled = false;
+        sliderMin.parentElement.style.opacity = '1';
+        sliderMax.parentElement.style.opacity = '1';
+        
+        statusText.textContent = "Modo Armónico: Control Total Activado.";
     } else {
-        rootNoteContainer.classList.add('hidden');
+        if(rootNoteContainer) rootNoteContainer.classList.add('hidden');
+        if(voicingContainer) voicingContainer.classList.add('hidden');
+        
         sliderMin.disabled = false;
         sliderMax.disabled = false;
         sliderMin.parentElement.style.opacity = '1';
         sliderMax.parentElement.style.opacity = '1';
         statusText.textContent = "Modo Espectral: Control directo de Hz.";
-        // Nota: El modo espectral aún usaría la vieja lógica si quisieras soportarlo, 
-        // pero para este commit nos enfocamos en Musical.
     }
 }
 
-// --- EVENT LISTENERS (Resto igual) ---
+// --- EVENT LISTENERS ---
 document.getElementById('btnPlay').addEventListener('click', play);
 document.getElementById('btnStop').addEventListener('click', stop);
 document.getElementById('btnExport').addEventListener('click', exportWAV);
@@ -607,9 +573,24 @@ document.getElementById('btnModeSpectral').addEventListener('click', () => {
     }
 });
 
-document.getElementById('selectRootNote').addEventListener('change', (e) => {
-    // No necesita recalcular todo inmediatamente, updateHarmony lo hará en el loop
-    statusText.textContent = `Raíz cambiada a ${e.target.options[e.target.selectedIndex].text}`;
+document.getElementById('selectRootNote').addEventListener('change', () => {
+    statusText.textContent = "Raíz armónica actualizada.";
+});
+
+if (document.getElementById('selectVoicing')) {
+    document.getElementById('selectVoicing').addEventListener('change', () => {
+        statusText.textContent = "Textura armónica cambiada.";
+    });
+}
+
+document.getElementById('paramFreqMin').addEventListener('input', (e) => {
+    state.freqMin = parseInt(e.target.value);
+    document.getElementById('valFreqMin').textContent = state.freqMin + ' Hz';
+});
+
+document.getElementById('paramFreqMax').addEventListener('input', (e) => {
+    state.freqMax = parseInt(e.target.value);
+    document.getElementById('valFreqMax').textContent = state.freqMax + ' Hz';
 });
 
 document.getElementById('paramSpeed').addEventListener('input', (e) => {
@@ -630,7 +611,7 @@ document.getElementById('paramVol').addEventListener('input', (e) => {
     }
 });
 
-// Scrubber Logic (Igual)
+// --- LÓGICA DEL SCRUBBER ---
 scrubSlider.addEventListener('pointerdown', () => { state.isScrubbing = true; });
 scrubSlider.addEventListener('pointerup', () => { 
     state.isScrubbing = false; 
