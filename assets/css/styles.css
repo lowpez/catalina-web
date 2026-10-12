@@ -23,7 +23,7 @@ body {
     flex-direction: column;
     align-items: center;
     min-height: 100vh;
-    padding: 2rem;
+    padding: 0rem;
 }
 h1 { 
 font-family: var(--font-display); 
@@ -385,7 +385,7 @@ button.secondary:hover { background: var(--accent-dim); }
 /* Móvil */
 @media (max-width: 768px) {
     body {
-        padding: 1rem;
+        padding: 0rem;
     }
     
     h1 {
@@ -466,4 +466,73 @@ button.secondary:hover { background: var(--accent-dim); }
         border-bottom: 1px solid #333;
         padding-bottom: 0.8rem;
     }
+}
+
+
+/* --- BARRA DE NAVEGACIÓN SUPERIOR --- */
+.top-nav {
+    align-self: stretch; /* ← CLAVE: rompe el align-items: center del body */
+    width: 100%;
+    background: var(--text); /* #08100C - fondo oscuro */
+    color: #ffffff;
+    padding: 0.6rem 2rem;
+    margin-bottom: 1rem;
+}
+
+.nav-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 2rem;
+}
+
+.nav-brand {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.nav-brand h1 {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    letter-spacing: -0.05em;
+    margin: 0;
+    color: #ffffff;
+}
+
+.nav-brand h1 span {
+    color: var(--accent);
+}
+
+.nav-subtitle {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var (--input-text);
+    margin: 0;
+    letter-spacing: 0.02em;
+}
+
+.nav-links {
+    display: flex;
+    gap: 1.5rem;
+    align-items: center;
+}
+
+.nav-links a {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.7);
+    text-decoration: none;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    transition: color 0.2s;
+    padding: 0.4rem 0.8rem;
+    border-radius: 4px;
+}
+
+.nav-links a:hover {
+    color: var(--accent);
+    background: rgba(0, 255, 157, 0.1);
 }
