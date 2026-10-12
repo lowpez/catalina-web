@@ -24,7 +24,7 @@ const state = {
     
     isInverted: true,
     isLooping: true,
-    isPingPong: false,
+    isPingPong: true,
     isRandom: false,
     isScrubbing: false, 
     
