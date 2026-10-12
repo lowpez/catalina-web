@@ -1,7 +1,8 @@
 /**
- * CATALINA WEB - Core Engine (Fase 3.7 - Random Generativo Reactivo)
- * Corrección: Los controles (Raíz, Voicing, Escala) ahora funcionan en tiempo real en modo Random.
- * Mejora: El filtro de audio reacciona a la densidad de la imagen en modo Random.
+ * CATALINA WEB - Core Engine (Fase 3.9 - Random Geométrico Estable)
+ * Base: Versión Funcional 3.7
+ * Mejora Crítica: El modo Random ahora mapea la posición VERTICAL del trazo 
+ * hacia la altura tonal (Agudos/Graves), haciendo que cada dibujo tenga una "voz" única.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -28,8 +29,8 @@ const state = {
     isScrubbing: false, 
     lastRandomTime: 0,
     
-    freqMin: 65.41,
-    freqMax: 1046.50,
+    freqMin: 65.41,   // C2
+    freqMax: 1046.50, // C6
     currentMode: 'musical',
     
     masterVolume: 0.7,
@@ -39,8 +40,8 @@ const state = {
     gainNodes: [],
     masterGain: null,
     filter: null,
-    lfo: null,
-    lfoGain: null,
+    lfo: null,      // CORRECCIÓN: Declaración explícita
+    lfoGain: null,  // CORRECCIÓN: Declaración explícita
     currentChordFreqs: [] 
 };
 
@@ -153,6 +154,7 @@ function initAudio() {
     state.filter.connect(state.masterGain);
     state.masterGain.connect(state.audioCtx.destination);
 
+    // CORRECCIÓN BUG FASE 3.8: Uso correcto de state.lfo y state.lfoGain
     state.lfo = state.audioCtx.createOscillator();
     state.lfoGain = state.audioCtx.createGain();
     state.lfo.frequency.value = 0.5;
@@ -175,7 +177,6 @@ function initAudio() {
     updateHarmony(0.5); 
 }
 
-// --- ACTUALIZAR ARMONÍA (AHORA USADA POR AMBOS MODOS) ---
 function updateHarmony(dummyBrightness) {
     if (!state.audioCtx) return;
     const rootSelect = document.getElementById('selectRootNote');
@@ -189,7 +190,6 @@ function updateHarmony(dummyBrightness) {
     state.currentChordFreqs = newFreqs;
 
     const now = state.audioCtx.currentTime;
-    // Actualizamos las frecuencias de los osciladores principales (útil para modo Normal)
     for (let i = 0; i < CONFIG.bands; i++) {
         if (newFreqs[i]) {
             state.oscillators[i].frequency.setTargetAtTime(newFreqs[i], now, 0.08);
@@ -197,9 +197,46 @@ function updateHarmony(dummyBrightness) {
     }
 }
 
-// --- HELPERS PARA EL SEQUENCER ---
+// --- HELPERS PARA EL SEQUENCER GEOMÉTRICO ---
+
+/**
+ * NUEVA FUNCIÓN CLAVE:
+ * Dado un índice de columna X, calcula dónde está el "centro de masa" visual.
+ * Devuelve el índice de la nota del acorde (0-7) que mejor representa esa posición vertical.
+ */
+function getGeometricBandIndex(colX) {
+    const colOffset = colX * CONFIG.bands;
+    let weightedSum = 0;
+    let totalIntensity = 0;
+    
+    // Recorremos las 8 bandas verticales de esa columna
+    for (let b = 0; b < CONFIG.bands; b++) {
+        let brightness = state.columnData[colOffset + b];
+        if (state.isInverted) brightness = 1 - brightness;
+        
+        // Ignoramos valores muy bajos para evitar ruido
+        if (brightness < 0.05) continue;
+
+        // Peso: Cuanto más brillante, más cuenta
+        // Posición: b=0 es Arriba (Agudo?), b=7 es Abajo (Grave?)
+        // En nuestra escala, asumimos que índices altos = notas graves (depende del voicing, pero es consistente)
+        
+        weightedSum += brightness * b;
+        totalIntensity += brightness;
+    }
+
+    if (totalIntensity === 0) return -1; // Columna vacía
+
+    // Promedio ponderado de la posición vertical (0 a 7)
+    const avgVerticalPos = weightedSum / totalIntensity;
+    
+    // Redondear al índice entero más cercano (0, 1, ..., 7)
+    return Math.round(avgVerticalPos);
+}
+
 function playSingleNote(bandIndex, velocity, time) {
-    if (!state.audioCtx) return;
+    if (!state.audioCtx || bandIndex < 0 || bandIndex >= CONFIG.bands) return;
+    
     const osc = state.audioCtx.createOscillator();
     const gainNode = state.audioCtx.createGain();
     
@@ -237,47 +274,44 @@ function restoreMainOscillators(columnValues, time) {
     }
 }
 
-// --- ACTUALIZAR AUDIO DESDE PROGRESO (CORREGIDO) ---
+// --- ACTUALIZAR AUDIO DESDE PROGRESO (MEJORADO) ---
 function updateAudioFromProgress(progress) {
     const now = state.audioCtx.currentTime;
     
     if (state.isRandom && !state.isScrubbing) {
-        // MODO RANDOM: Secuenciador Generativo Reactivo
+        // MODO RANDOM: Secuenciador Geométrico
         
         if (!state.lastRandomTime || (now - state.lastRandomTime) > 0.15) {
             
-            // 1. ACTUALIZAR ARMONÍA (Raíz, Voicing, Escala) EN TIEMPO REAL
+            // 1. Actualizar armonía global (Raíz/Escala/Voicing siguen afectando)
             updateHarmony(0.5); 
             
-            // 2. ELEGIR POSICIÓN ALEATORIA
+            // 2. Elegir posición X aleatoria
             const randX = Math.floor(Math.random() * state.width);
-            const colOffset = randX * CONFIG.bands;
             
-            let maxBrightness = 0;
-            let bestBandIndex = 0;
-            let totalColBrightness = 0;
+            // 3. OBTENER ÍNDICE BASADO EN LA GEOMETRÍA VERTICAL DEL TRAZO
+            // Esta es la clave: ya no usamos "la banda más brillante", 
+            // usamos "donde está concentrada la luz verticalmente".
+            const geoBandIndex = getGeometricBandIndex(randX);
             
-            // 3. LEER LA COLUMNA DE LA IMAGEN
-            for (let b = 0; b < CONFIG.bands; b++) {
-                let brightness = state.columnData[colOffset + b];
-                if (state.isInverted) brightness = 1 - brightness;
-                totalColBrightness += brightness;
-                
-                if (brightness > maxBrightness) {
-                    maxBrightness = brightness;
-                    bestBandIndex = b;
+            if (geoBandIndex !== -1) {
+                // Calcular intensidad bruta de esa columna para el volumen
+                const colOffset = randX * CONFIG.bands;
+                let maxBright = 0;
+                for(let b=0; b<CONFIG.bands; b++){
+                     let br = state.columnData[colOffset+b];
+                     if(state.isInverted) br = 1-br;
+                     if(br > maxBright) maxBright = br;
                 }
-            }
-            
-            const avgColBrightness = totalColBrightness / CONFIG.bands;
-            
-            // 4. MODULAR EL FILTRO SEGÚN LA DENSIDAD DE LA IMAGEN (¡Esto lo ata al dibujo!)
-            const cutoff = 600 + (avgColBrightness * 7000 * state.filterAmount);
-            state.filter.frequency.setTargetAtTime(cutoff, now, 0.1);
-            
-            // 5. TOCAR NOTA SI HAY CONTENIDO
-            if (avgColBrightness > 0.05) {
-                playSingleNote(bestBandIndex, maxBrightness, now);
+
+                // 4. Tocar la nota correspondiente
+                playSingleNote(geoBandIndex, maxBright, now);
+                
+                // 5. Filtro reactivo a la densidad general de la imagen (opcional, mantiene color)
+                // Usamos el brillo promedio de TODA la imagen actual para el filtro base
+                // Para simplificar, usamos el brillo de la columna seleccionada
+                const cutoff = 800 + (maxBright * 6000 * state.filterAmount);
+                state.filter.frequency.setTargetAtTime(cutoff, now, 0.1);
             }
             
             state.lastRandomTime = now;
@@ -302,7 +336,6 @@ function updateAudioFromProgress(progress) {
 
         const avgBrightness = totalBrightness / CONFIG.bands;
         
-        // Actualizar armonía y filtros
         updateHarmony(avgBrightness);
         const cutoff = 800 + (avgBrightness * 6000 * state.filterAmount);
         state.filter.frequency.setTargetAtTime(cutoff, now, 0.1);
@@ -448,7 +481,7 @@ function audioLoop() {
     requestAnimationFrame(audioLoop);
 }
 
-// --- EXPORTACIÓN A WAV (CORREGIDA) ---
+// --- EXPORTACIÓN A WAV (ACTUALIZADA CON LÓGICA GEOMÉTRICA) ---
 async function exportWAV() {
     if (!state.imageData) return;
     statusText.textContent = "Renderizando pieza armónica...";
@@ -502,52 +535,53 @@ async function exportWAV() {
         
         if (state.isRandom) {
             if (t - lastRandomExportTime > 0.15) {
-                // Actualizar acorde para exportación
                 const chordFreqs = generateChordVoicing(Math.round(rootMidi), voicingType);
                 
                 const randX = Math.floor(Math.random() * state.width);
-                const colOffset = randX * CONFIG.bands;
-                let maxBrightness = 0;
-                let bestBandIndex = 0;
-                let totalColBrightness = 0;
                 
+                // LÓGICA GEOMÉTRICA DUPLICADA PARA OFFLINE CONTEXT
+                const colOffset = randX * CONFIG.bands;
+                let weightedSum = 0;
+                let totalIntensity = 0;
+                let maxBright = 0;
+
                 for (let b = 0; b < CONFIG.bands; b++) {
                     let brightness = state.columnData[colOffset + b];
                     if (state.isInverted) brightness = 1 - brightness;
-                    totalColBrightness += brightness;
-                    if (brightness > maxBrightness) {
-                        maxBrightness = brightness;
-                        bestBandIndex = b;
+                    
+                    if (brightness > maxBright) maxBright = brightness;
+
+                    if (brightness >= 0.05) {
+                        weightedSum += brightness * b;
+                        totalIntensity += brightness;
                     }
                 }
-                
-                const avgColBrightness = totalColBrightness / CONFIG.bands;
-                
-                // Modulación de filtro reactiva a la imagen
-                const cutoff = 600 + (avgColBrightness * 7000 * state.filterAmount);
-                filter.frequency.setValueAtTime(cutoff, t);
-                
-                if (avgColBrightness > 0.05) {
-                    const noteOsc = offlineCtx.createOscillator();
-                    const noteGain = offlineCtx.createGain();
-                    const freq = chordFreqs[bestBandIndex] || midiToFreq(60);
+
+                if (totalIntensity > 0) {
+                    const geoBandIndex = Math.round(weightedSum / totalIntensity);
                     
-                    noteOsc.type = 'triangle';
-                    noteOsc.frequency.setValueAtTime(freq, t);
-                    
-                    const attack = 0.02;
-                    const decay = 0.3;
-                    const volume = Math.pow(maxBrightness, 1.5) * 0.4;
-                    
-                    noteGain.gain.setValueAtTime(0, t);
-                    noteGain.gain.linearRampToValueAtTime(volume, t + attack);
-                    noteGain.gain.exponentialRampToValueAtTime(0.001, t + attack + decay);
-                    
-                    noteOsc.connect(noteGain);
-                    noteGain.connect(filter);
-                    
-                    noteOsc.start(t);
-                    noteOsc.stop(t + attack + decay + 0.1);
+                    if (geoBandIndex >= 0 && geoBandIndex < CONFIG.bands) {
+                        const noteOsc = offlineCtx.createOscillator();
+                        const noteGain = offlineCtx.createGain();
+                        const freq = chordFreqs[geoBandIndex] || midiToFreq(60);
+                        
+                        noteOsc.type = 'triangle';
+                        noteOsc.frequency.setValueAtTime(freq, t);
+                        
+                        const volume = Math.pow(maxBright, 1.5) * 0.4;
+                        const attack = 0.02;
+                        const decay = 0.3;
+                        
+                        noteGain.gain.setValueAtTime(0, t);
+                        noteGain.gain.linearRampToValueAtTime(volume, t + attack);
+                        noteGain.gain.exponentialRampToValueAtTime(0.001, t + attack + decay);
+                        
+                        noteOsc.connect(noteGain);
+                        noteGain.connect(filter);
+                        
+                        noteOsc.start(t);
+                        noteOsc.stop(t + attack + decay + 0.1);
+                    }
                 }
                 
                 for (let b = 0; b < CONFIG.bands; b++) {
@@ -592,7 +626,7 @@ async function exportWAV() {
     const url = URL.createObjectURL(wavBlob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `catalina_harmonic_${Date.now()}.wav`;
+    a.download = `catalina_geometric_${Date.now()}.wav`;
     a.click();
     
     statusText.textContent = "¡Exportación completada!";
