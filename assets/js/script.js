@@ -1,12 +1,13 @@
 /**
- * CATALINA WEB - Core Engine v4.3.2 (Compresor de Audio + Sensibilidad Mejorada)
+ * CATALINA WEB - Core Engine v4.3.3 (Corrección de Clipping & Sensibilidad Logarítmica)
  * 
- * BASE: v4.3.1 (UX Dinámica + Exportación Robusta)
- * NUEVO:
- * 1. Compresor de audio (Tone.Compressor) para equilibrar volúmenes de líneas delgadas y gruesas.
- * 2. Curva de respuesta ajustada: umbral más bajo (0.01) y exponente 0.8 para mayor sensibilidad.
- * 3. Las líneas finas (1-2px) ahora son audibles sin perder la naturaleza armónica original.
- * 4. Compresor aplicado tanto en reproducción en vivo como en exportación WAV.
+ * BASE: v4.3.2
+ * FIXES:
+ * 1. Eliminado el "Pumping" y saturación causados por compresión excesiva.
+ * 2. Ajuste de Compresor: Threshold subido a -12dB, Ratio reducida a 2:1 (más natural).
+ * 3. Nueva Curva de Volumen: Implementación de escala logarítmica suavizada.
+ *    Esto permite escuchar líneas finas (1-2px) claramente SIN amplificar el ruido de fondo 
+ *    ni causar distorsión digital en picos altos.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -46,7 +47,7 @@ const state = {
     linealVoices: [],
     linealGains: [],
     filter: null,
-    compressor: null, // NUEVO: Compresor de audio
+    compressor: null,
     reverb: null,
     delay: null,
     lastGenTime: 0,
@@ -165,7 +166,7 @@ function drawBandsOverlay() {
 }
 
 // ==============================================================================
-// MOTOR DE AUDIO CON TONE.JS (CON COMPRESOR)
+// MOTOR DE AUDIO CON TONE.JS (AJUSTADO PARA CLARIDAD)
 // ==============================================================================
 
 async function initAudio() {
@@ -188,15 +189,16 @@ async function initAudio() {
         Q: 0.7
     });
 
-    // ✅ NUEVO: Compresor de audio para equilibrar líneas delgadas y gruesas
+    // ✅ FIX v4.3.3: Compresor más suave para evitar pumping/distorsión
+    // Threshold subido (-12dB) para no amplificar tanto el silencio/ruido base.
+    // Ratio bajada (2:1) para una compresión musical, no agresiva.
     state.compressor = new Tone.Compressor({
-        threshold: -24,    // dB: comienza a comprimir por encima de este nivel
-        ratio: 4.5,        // 4.5:1 de compresión
-        attack: 0.003,     // ataque rápido
-        release: 0.25      // release suave
+        threshold: -12,    
+        ratio: 2,          
+        attack: 0.01,      
+        release: 0.2       
     });
     
-    // Cadena: Filter -> Compressor -> Delay -> Reverb -> Destination
     state.filter.connect(state.compressor);
     state.compressor.connect(state.delay);
 
@@ -246,7 +248,7 @@ function updateEntropyParameters() {
 }
 
 // ==============================================================================
-// LÓGICA DE REPRODUCCIÓN (CON SENSIBILIDAD MEJORADA)
+// LÓGICA DE REPRODUCCIÓN (SENSIBILIDAD LOGARÍTMICA SUAVIZADA)
 // ==============================================================================
 
 function processColumnForMusic(xIndex, currentTime) {
@@ -276,9 +278,10 @@ function processColumnForMusic(xIndex, currentTime) {
                 let brightness = state.columnData[colOffset + b];
                 if (state.isInverted) brightness = 1 - brightness;
                 
-                // ✅ MEJORADO: Umbral más bajo (0.01) para detectar líneas delgadas
-                if (brightness > 0.01 && Math.random() < triggerProbability) {
-                    const velocity = Math.min(1, Math.pow(brightness, 1.2));
+                // Umbral conservador para modo generativo
+                if (brightness > 0.05 && Math.random() < triggerProbability) {
+                    // Velocity basada en raíz cuadrada para mejor rango dinámico
+                    const velocity = Math.min(1, Math.sqrt(brightness)); 
                     const { freq } = selectNoteWithEntropy(chordFreqs, scaleName);
                     const noteStr = Tone.Frequency(freq, "hz").toNote();
                     
@@ -304,8 +307,20 @@ function processColumnForMusic(xIndex, currentTime) {
             if (state.isInverted) brightness = 1 - brightness;
             
             state.linealVoices[b].frequency.rampTo(chordFreqs[b], 0.1);
-            // ✅ MEJORADO: Umbral más bajo (0.01) y curva más sensible (0.8)
-            const targetGain = brightness > 0.01 ? Math.pow(brightness, 0.8) * 1.5 : 0;
+            
+            // ✅ FIX v4.3.3: Función de mapeo Logarítmico Suavizado
+            // Formula: Gain = K * ln(1 + Brightness * Factor)
+            // Esto da cuerpo a las líneas finas sin disparar el volumen en las gruesas.
+            const sensitivityFactor = 10; // Controla cuánto "peso" tienen los grises medios/bajos
+            const kMultiplier = 0.4;      // Escala general
+            
+            // Calculamos ganancia cruda
+            let rawGain = kMultiplier * Math.log(1 + (brightness * sensitivityFactor));
+            
+            // Normalizamos ligeramente para asegurar que negro puro sea 0 y blanco puro tenga techo
+            // Clamp manual para evitar valores negativos por redondeo float
+            const targetGain = Math.max(0, Math.min(1.0, rawGain)); 
+            
             state.linealGains[b].gain.rampTo(targetGain, 0.15);
         }
     }
@@ -487,7 +502,7 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
 });
 
 // ==============================================================================
-// EXPORTACIÓN A WAV (CON COMPRESOR)
+// EXPORTACIÓN A WAV (CONSISTENTE CON LIVE PLAYBACK)
 // ==============================================================================
 
 async function exportWAV() {
@@ -504,17 +519,16 @@ async function exportWAV() {
         
         const renderedBuffer = await Tone.Offline(async () => {
             
-            // 1. Configurar cadena de efectos con compresor
+            // Cadena idéntica al live playback
             const offReverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }).toDestination();
             const offDelay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.2, wet: 0.2 }).connect(offReverb);
             const offFilter = new Tone.Filter({ type: "lowpass", frequency: 4000, Q: 0.7 });
             
-            // ✅ NUEVO: Compresor en exportación
             const offCompressor = new Tone.Compressor({
-                threshold: -24,
-                ratio: 4.5,
-                attack: 0.003,
-                release: 0.25
+                threshold: -12,
+                ratio: 2,
+                attack: 0.01,
+                release: 0.2
             });
             
             offFilter.connect(offCompressor);
@@ -554,7 +568,6 @@ async function exportWAV() {
             
             const chordFreqs = generateChordVoicing(rootMidi, voicingType);
 
-            // 2. Programar eventos en la línea de tiempo
             for (let t = 0; t < exportDuration; t += stepTime) {
                 const cycleProgress = (t % state.durationSec) / state.durationSec;
                 
@@ -581,9 +594,8 @@ async function exportWAV() {
                             
                             const seedRandom = Math.sin(t * 1000 + b) * 0.5 + 0.5;
                             
-                            // ✅ MEJORADO: Umbral más bajo (0.01)
-                            if (brightness > 0.01 && seedRandom < triggerProbability) {
-                                const velocity = Math.min(1, Math.pow(brightness, 1.2));
+                            if (brightness > 0.05 && seedRandom < triggerProbability) {
+                                const velocity = Math.min(1, Math.sqrt(brightness));
                                 
                                 const scaleIntervals = SCALES[scaleName] || SCALES.lydian;
                                 const scaleLength = scaleIntervals.length;
@@ -616,8 +628,13 @@ async function exportWAV() {
                             if (state.isInverted) brightness = 1 - brightness;
                             
                             offLinealVoices[b].frequency.rampTo(chordFreqs[b], 0.1, t);
-                            // ✅ MEJORADO: Umbral más bajo (0.01) y curva más sensible (0.8)
-                            const targetGain = brightness > 0.01 ? Math.pow(brightness, 0.8) * 1.5 : 0;
+                            
+                            // Misma fórmula logarítmica que en Live Playback
+                            const sensitivityFactor = 10;
+                            const kMultiplier = 0.4;
+                            let rawGain = kMultiplier * Math.log(1 + (brightness * sensitivityFactor));
+                            const targetGain = Math.max(0, Math.min(1.0, rawGain));
+                            
                             offLinealGains[b].gain.rampTo(targetGain, 0.15, t);
                         }
                         lastLinealTime = t;
@@ -627,7 +644,6 @@ async function exportWAV() {
             
         }, exportDuration);
 
-        // 3. Convertir el buffer renderizado a WAV
         const wavBlob = bufferToWave(renderedBuffer, renderedBuffer.length);
         const url = URL.createObjectURL(wavBlob);
         const a = document.createElement('a');
