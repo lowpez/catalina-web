@@ -1,8 +1,12 @@
 /**
- * CATALINA WEB - Core Engine (Fase 3.9 - Random Geométrico Estable)
- * Base: Versión Funcional 3.7
- * Mejora Crítica: El modo Random ahora mapea la posición VERTICAL del trazo 
- * hacia la altura tonal (Agudos/Graves), haciendo que cada dibujo tenga una "voz" única.
+ * CATALINA WEB - Core Engine (Fase 3.9 - Random Geométrico Estable + Sync UI)
+ * 
+ * MEJORAS CLAVE:
+ * 1. Modo Random ahora usa "Centroide Vertical": Si el cursor cae arriba del dibujo, suena agudo; abajo, grave.
+ *    Esto hace que la melodía dependa realmente de la forma geométrica de la imagen.
+ * 2. Corrección de Bug: Se arregló el error 'lfo is not defined' en initAudio().
+ * 3. Sincronización UI: Al cargar la página, los sliders se fuerzan a mostrar el valor real del estado,
+ *    evitando discrepancias visuales causadas por el autocompletado/restauración del navegador.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -767,3 +771,40 @@ scrubSlider.addEventListener('touchend', () => {
         state.startTime = state.audioCtx.currentTime - (progress * state.durationSec);
     }
 });
+
+// --- SINCRONIZACIÓN INICIAL DE SLIDERS (FIX UI BUG) ---
+// Forzar que los sliders reflejen los valores del estado al cargar
+function syncSlidersInitialState() {
+    // Velocidad
+    const speedSlider = document.getElementById('paramSpeed');
+    speedSlider.value = state.durationSec;
+    document.getElementById('valSpeed').textContent = state.durationSec.toFixed(1) + 's';
+    
+    // Frecuencia Mínima
+    const freqMinSlider = document.getElementById('paramFreqMin');
+    freqMinSlider.value = state.freqMin;
+    document.getElementById('valFreqMin').textContent = state.freqMin + ' Hz';
+    
+    // Frecuencia Máxima
+    const freqMaxSlider = document.getElementById('paramFreqMax');
+    freqMaxSlider.value = state.freqMax;
+    document.getElementById('valFreqMax').textContent = state.freqMax + ' Hz';
+    
+    // Filtro
+    const filterSlider = document.getElementById('paramFilter');
+    filterSlider.value = state.filterAmount * 100;
+    document.getElementById('valFilter').textContent = (state.filterAmount * 100) + '%';
+    
+    // Volumen
+    const volSlider = document.getElementById('paramVol');
+    volSlider.value = state.masterVolume * 100;
+    document.getElementById('valVol').textContent = (state.masterVolume * 100) + '%';
+    
+    // Scrub (siempre 0 al inicio)
+    const scrubSlider = document.getElementById('paramScrub');
+    scrubSlider.value = 0;
+    document.getElementById('valScrub').textContent = '0%';
+}
+
+// Ejecutar al cargar el DOM
+document.addEventListener('DOMContentLoaded', syncSlidersInitialState);

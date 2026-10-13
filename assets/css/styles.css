@@ -239,7 +239,7 @@ button {
     text-transform: uppercase;
     font-size: 0.85rem;
 }
-button:hover { background: #33ffb5; /*transform: translateY(-1px);*/ }
+button:hover { background: #33ffb5;  color: var(--text); /*transform: translateY(-1px);*/ }
 button:disabled { background: #333; color: #666; cursor: not-allowed; transform: none; }
 button.secondary { background: var(--secondary-bg); border: 1px solid var(--secondary-bg); color: var(--text); }
 button.secondary:hover { background: var(--accent-dim); }
