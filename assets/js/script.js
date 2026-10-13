@@ -1,12 +1,11 @@
 /**
- * CATALINA WEB - Core Engine (Fase 3.11 - Resolución Dinámica Proporcional + Fullscreen)
+ * CATALINA WEB - Core Engine v4.0 (Tone.js Migration + Generative Music)
  * 
- * CARACTERÍSTICAS:
- * 1. Motor armónico con selector de escala y voicings.
- * 2. Random Geométrico (mapea posición vertical del trazo a altura tonal).
- * 3. Sincronización UI (sliders y toggles al recargar).
- * 4. Modo Fullscreen con botón en esquina superior derecha.
- * 5. NUEVO: Resolución de canvas dinámica y proporcional a la imagen original (sin deformaciones ni pixelación).
+ * BASE: Fase 3.11 (Resolución Dinámica Proporcional + Fullscreen)
+ * CAMBIOS CLAVE:
+ * 1. Motor de audio migrado a Tone.js (elimina clipping/aliasing nativo).
+ * 2. Nuevo modo "Generative": Compón música reactiva basada en la imagen escaneada.
+ * 3. Sincronización precisa mediante Tone.Transport.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -16,10 +15,9 @@ const CONFIG = {
 };
 
 const state = {
-    audioCtx: null,
     isPlaying: false,
-    scanX: 0,
     startTime: 0,
+    scanX: 0,
     durationSec: 2.0,
     imageData: null,
     columnData: null,
@@ -29,24 +27,24 @@ const state = {
     isInverted: true,
     isLooping: true,
     isPingPong: true,
-    isRandom: false,
-    isScrubbing: false, 
-    lastRandomTime: 0,
+    isGenerative: false, // FALSE = Lineal, TRUE = Random
+    isScrubbing: false,
     
-    freqMin: 65.41,
-    freqMax: 1046.50,
     currentMode: 'musical',
     
     masterVolume: 0.7,
     filterAmount: 0.5,
+    freqMin: 65.41,
+    freqMax: 1046.50,
     
-    oscillators: [],
-    gainNodes: [],
-    masterGain: null,
+    // Elementos Tone.js
+    randomSynth: null,   // Para modo Random (Staccato)
+    linealVoices: [],    // 8 Osciladores fijos para modo Lineal (Ultra estable)
+    linealGains: [],     // 8 Nodos de ganancia para modular volumen suavemente
     filter: null,
-    lfo: null,
-    lfoGain: null,
-    currentChordFreqs: [] 
+    reverb: null,
+    delay: null,
+    lastGenTime: 0
 };
 
 // --- UTILIDADES MUSICALES ---
@@ -139,214 +137,284 @@ function drawBandsOverlay() {
     ctx.setLineDash([]);
 }
 
-function initAudio() {
-    if (state.audioCtx) return;
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    state.audioCtx = new AudioContext();
-    
-    state.oscillators = [];
-    state.gainNodes = [];
-    
-    state.masterGain = state.audioCtx.createGain();
-    state.masterGain.gain.value = state.masterVolume;
-    
-    state.filter = state.audioCtx.createBiquadFilter();
-    state.filter.type = 'lowpass';
-    state.filter.frequency.value = 4000;
-    state.filter.Q.value = 0.7;
-    
-    state.filter.connect(state.masterGain);
-    state.masterGain.connect(state.audioCtx.destination);
+// ==============================================================================
+// MOTOR DE AUDIO CON TONE.JS (OPTIMIZADO)
+// ==============================================================================
 
-    state.lfo = state.audioCtx.createOscillator();
-    state.lfoGain = state.audioCtx.createGain();
-    state.lfo.frequency.value = 0.5;
-    state.lfoGain.gain.value = 1.5;
-    state.lfo.connect(state.lfoGain);
-    state.lfo.start();
-
-    for (let i = 0; i < CONFIG.bands; i++) {
-        const osc = state.audioCtx.createOscillator();
-        const gain = state.audioCtx.createGain();
-        osc.type = 'triangle'; 
-        gain.gain.value = 0;
-        state.lfoGain.connect(osc.detune);
-        osc.connect(gain);
-        gain.connect(state.filter);
-        osc.start();
-        state.oscillators.push(osc);
-        state.gainNodes.push(gain);
+async function initAudio() {
+    if (state.randomSynth && state.linealVoices.length > 0) return;
+    
+    try {
+        await Tone.start();
+        console.log("Tone.js Ready.");
+    } catch (e) {
+        console.error("Error iniciando Tone:", e);
+        return;
     }
-    updateHarmony(0.5); 
+
+    // 1. Cadena de Efectos Global
+    state.reverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }).toDestination();
+    // ✅ Feedback reducido a 0.2 para evitar acumulación infinita en loops
+    state.delay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.2, wet: 0.2 }).connect(state.reverb);
+    
+    state.filter = new Tone.Filter({
+        type: "lowpass",
+        frequency: 4000,
+        Q: 0.7
+    }).connect(state.delay);
+
+    // 2. Sintetizador para Modo Random (Staccato/Rítmico)
+    state.randomSynth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: "triangle" },
+        envelope: { attack: 0.05, decay: 0.2, sustain: 0.3, release: 1.0 },
+        volume: -10
+    }).connect(state.filter);
+
+    // 3. ✅ 8 Voces Fijas para Modo Lineal (Ultra estable, sin acumulación de notas)
+    state.linealVoices = [];
+    state.linealGains = [];
+    for (let i = 0; i < CONFIG.bands; i++) {
+        // Nodo de ganancia independiente para cada voz
+        const gain = new Tone.Gain(0).connect(state.filter);
+        // Oscilador de onda sinusoidal pura (muy bajo consumo de CPU)
+        const osc = new Tone.OmniOscillator({
+            type: "sine",
+            volume: -5 
+        }).connect(gain).start();
+        
+        state.linealVoices.push(osc);
+        state.linealGains.push(gain);
+    }
+
+    updateMasterVolume();
+    updateFilterFrequency(state.filterAmount);
 }
 
-function updateHarmony(dummyBrightness) {
-    if (!state.audioCtx) return;
+function updateMasterVolume() {
+    if (!state.randomSynth) return;
+    const db = 20 * Math.log10(Math.max(0.001, state.masterVolume));
+    Tone.Destination.volume.rampTo(db, 0.1);
+}
+
+function updateFilterFrequency(intensity) {
+    if (!state.filter) return;
+    const freq = 200 + (intensity * 7800);
+    state.filter.frequency.rampTo(freq, 0.1);
+}
+
+// ==============================================================================
+// LÓGICA DE REPRODUCCIÓN (OPTIMIZADA)
+// ==============================================================================
+
+function processColumnForMusic(xIndex, currentTime) {
+    if (!state.columnData || xIndex < 0 || xIndex >= state.width) return;
+
+    const colOffset = xIndex * CONFIG.bands;
+    
     const rootSelect = document.getElementById('selectRootNote');
-    const rootHz = parseFloat(rootSelect ? rootSelect.value : 261.63) || 261.63;
-    const rootMidi = freqToMidi(rootHz);
-    
+    const scaleSelect = document.getElementById('selectScale');
     const voicingSelect = document.getElementById('selectVoicing');
-    const voicingType = voicingSelect ? (voicingSelect.value || 'chord-melody') : 'chord-melody';
     
-    const newFreqs = generateChordVoicing(Math.round(rootMidi), voicingType);
-    state.currentChordFreqs = newFreqs;
+    const rootHz = parseFloat(rootSelect ? rootSelect.value : 261.63) || 261.63;
+    const rootMidi = Math.round(freqToMidi(rootHz));
+    const voicingType = voicingSelect ? voicingSelect.value : 'chord-melody';
+    
+    const chordFreqs = generateChordVoicing(rootMidi, voicingType);
 
-    const now = state.audioCtx.currentTime;
-    for (let i = 0; i < CONFIG.bands; i++) {
-        if (newFreqs[i]) {
-            state.oscillators[i].frequency.setTargetAtTime(newFreqs[i], now, 0.08);
-        }
-    }
-}
-
-function getGeometricBandIndex(colX) {
-    const colOffset = colX * CONFIG.bands;
-    let weightedSum = 0;
-    let totalIntensity = 0;
-    
-    for (let b = 0; b < CONFIG.bands; b++) {
-        let brightness = state.columnData[colOffset + b];
-        if (state.isInverted) brightness = 1 - brightness;
-        
-        if (brightness < 0.05) continue;
-        
-        weightedSum += brightness * b;
-        totalIntensity += brightness;
-    }
-
-    if (totalIntensity === 0) return -1;
-    const avgVerticalPos = weightedSum / totalIntensity;
-    return Math.round(avgVerticalPos);
-}
-
-function playSingleNote(bandIndex, velocity, time) {
-    if (!state.audioCtx || bandIndex < 0 || bandIndex >= CONFIG.bands) return;
-    
-    const osc = state.audioCtx.createOscillator();
-    const gainNode = state.audioCtx.createGain();
-    
-    const freq = state.currentChordFreqs[bandIndex] || midiToFreq(60); 
-    
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(freq, time);
-    
-    const attack = 0.02;
-    const decay = 0.3;
-    const volume = Math.pow(velocity, 1.5) * 0.4;
-    
-    gainNode.gain.setValueAtTime(0, time);
-    gainNode.gain.linearRampToValueAtTime(volume, time + attack);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, time + attack + decay);
-    
-    osc.connect(gainNode);
-    gainNode.connect(state.filter);
-    
-    osc.start(time);
-    osc.stop(time + attack + decay + 0.1);
-}
-
-function forceSilenceMainOscillators(time) {
-    if (!state.oscillators.length) return;
-    state.gainNodes.forEach(g => g.gain.setTargetAtTime(0, time, 0.05));
-}
-
-function restoreMainOscillators(columnValues, time) {
-    if (!state.oscillators.length) return;
-    for (let b = 0; b < CONFIG.bands; b++) {
-        const val = columnValues[b];
-        const dynamicGain = Math.pow(val, 1.5) * 0.25;
-        state.gainNodes[b].gain.setTargetAtTime(dynamicGain, time, 0.05);
-    }
-}
-
-function updateAudioFromProgress(progress) {
-    const now = state.audioCtx.currentTime;
-    
-    if (state.isRandom && !state.isScrubbing) {
-        if (!state.lastRandomTime || (now - state.lastRandomTime) > 0.15) {
-            updateHarmony(0.5); 
+    if (state.isGenerative) {
+        // --- MODO RANDOM (Staccato/Rítmico) ---
+        if (currentTime - state.lastGenTime > 0.15) { // Throttle de 150ms
+            const notesToTrigger = [];
             
-            const randX = Math.floor(Math.random() * state.width);
-            const geoBandIndex = getGeometricBandIndex(randX);
-            
-            if (geoBandIndex !== -1) {
-                const colOffset = randX * CONFIG.bands;
-                let maxBright = 0;
-                for(let b=0; b<CONFIG.bands; b++){
-                     let br = state.columnData[colOffset+b];
-                     if(state.isInverted) br = 1-br;
-                     if(br > maxBright) maxBright = br;
-                }
-
-                playSingleNote(geoBandIndex, maxBright, now);
+            for (let b = 0; b < CONFIG.bands; b++) {
+                let brightness = state.columnData[colOffset + b];
+                if (state.isInverted) brightness = 1 - brightness;
                 
-                const cutoff = 800 + (maxBright * 6000 * state.filterAmount);
-                state.filter.frequency.setTargetAtTime(cutoff, now, 0.1);
+                if (brightness > 0.15) {
+                    const velocity = Math.min(1, Math.pow(brightness, 1.2));
+                    const noteStr = Tone.Frequency(chordFreqs[b], "hz").toNote();
+                    notesToTrigger.push({
+                        note: noteStr,
+                        time: currentTime,
+                        velocity: velocity,
+                        duration: "16n"
+                    });
+                }
             }
-            
-            state.lastRandomTime = now;
+
+            if (notesToTrigger.length > 0) {
+                // ✅ Limitar a 3 voces simultáneas para evitar saturación en modo random
+                notesToTrigger.slice(0, 3).forEach(v => {
+                    state.randomSynth.triggerAttackRelease(v.note, v.duration, v.time, v.velocity);
+                });
+            }
+            state.lastGenTime = currentTime;
         }
-        
-        forceSilenceMainOscillators(now);
-
     } else {
-        state.scanX = Math.floor(progress * (state.width - 1));
-        
-        const colOffset = state.scanX * CONFIG.bands;
-        let totalBrightness = 0;
-        const columnValues = [];
-
+        // --- MODO LINEAL (8 Voces Fijas con Modulación de Ganancia) ---
+        // Esto elimina por completo la acumulación de notas y los "clicks"
         for (let b = 0; b < CONFIG.bands; b++) {
             let brightness = state.columnData[colOffset + b];
             if (state.isInverted) brightness = 1 - brightness;
-            columnValues.push(brightness);
-            totalBrightness += brightness;
+            
+            // 1. Actualizar frecuencia suavemente (si cambió la escala/raíz)
+            state.linealVoices[b].frequency.rampTo(chordFreqs[b], 0.1);
+            
+            // 2. Calcular ganancia objetivo (0 a 1) basado en el brillo
+            // Si el brillo es muy bajo, la ganancia va a 0 (silencio suave)
+            const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 1.2 : 0;
+            
+            // 3. Rampar la ganancia suavemente para evitar clicks o pops
+            state.linealGains[b].gain.rampTo(targetGain, 0.15);
         }
-
-        const avgBrightness = totalBrightness / CONFIG.bands;
-        
-        updateHarmony(avgBrightness);
-        const cutoff = 800 + (avgBrightness * 6000 * state.filterAmount);
-        state.filter.frequency.setTargetAtTime(cutoff, now, 0.1);
-        
-        restoreMainOscillators(columnValues, now);
     }
 }
 
-// --- PROCESAMIENTO DE IMAGEN (RESOLUCIÓN DINÁMICA PROPORCIONAL) ---
+// ==============================================================================
+// BUCLE PRINCIPAL
+// ==============================================================================
+
+async function play() {
+    if (!state.imageData) {
+        statusText.textContent = "⚠️ Por favor, carga una imagen primero.";
+        return;
+    }
+    
+    await initAudio();
+    
+    if (state.isPlaying) return;
+    
+    state.isPlaying = true;
+    state.startTime = Tone.now();
+    state.scanX = 0;
+    state.lastGenTime = 0;
+    
+    // Limpiar cualquier residuo anterior
+    if(state.randomSynth) state.randomSynth.releaseAll();
+    if(state.linealGains) {
+        state.linealGains.forEach(g => g.gain.rampTo(0, 0.1));
+    }
+    
+    scrubSlider.value = 0;
+    document.getElementById('valScrub').textContent = '0%';
+    
+    document.getElementById('btnPlay').disabled = true;
+    document.getElementById('btnStop').disabled = false;
+    playhead.style.display = 'block';
+    statusText.textContent = "Tocando partitura gráfica...";
+
+    requestAnimationFrame(audioLoop);
+}
+
+function stop() {
+    state.isPlaying = false;
+    state.isScrubbing = false;
+    
+    document.getElementById('btnPlay').disabled = false;
+    document.getElementById('btnStop').disabled = true;
+    playhead.style.display = 'none';
+    statusText.textContent = "Detenido.";
+    
+    // Silenciar todo suavemente
+    if (state.randomSynth) state.randomSynth.releaseAll();
+    if (state.linealGains) {
+        const now = Tone.now();
+        state.linealGains.forEach(g => g.gain.rampTo(0, 0.5));
+    }
+}
+
+function audioLoop() {
+    if (!state.isPlaying) return;
+
+    const now = Tone.now();
+    const elapsed = now - state.startTime;
+    let progress;
+
+    if (state.isScrubbing) {
+        const scrubValue = parseFloat(scrubSlider.value);
+        progress = scrubValue / 100;
+        updateUIPosition(progress);
+        processColumnForMusic(state.scanX, now);
+    } else {
+        if (state.isPingPong) {
+            const cycleDuration = state.durationSec * 2;
+            const rawProgress = (elapsed % cycleDuration) / state.durationSec;
+            progress = rawProgress <= 1 ? rawProgress : 2 - rawProgress;
+        } else {
+            progress = (elapsed % state.durationSec) / state.durationSec;
+        }
+
+        if (!state.isLooping) {
+            if (state.isPingPong) {
+                if (elapsed >= state.durationSec * 2) { stop(); return; }
+            } else {
+                if (elapsed >= state.durationSec) { stop(); return; }
+            }
+        }
+
+        state.scanX = Math.floor(progress * (state.width - 1));
+        
+        // Throttle unificado para no saturar la CPU
+        if (state.isGenerative) {
+            if (now - state.lastGenTime > 0.15) { 
+                processColumnForMusic(state.scanX, now);
+                state.lastGenTime = now;
+            }
+        } else {
+            // En modo lineal, actualizamos cada 100ms para transiciones de pad suaves
+            if (now - state.lastLinealTime > 0.1) {
+                processColumnForMusic(state.scanX, now);
+                state.lastLinealTime = now;
+            }
+        }
+
+        updateUIPosition(progress);
+    }
+
+    requestAnimationFrame(audioLoop);
+}
+
+function updateUIPosition(progress) {
+    const canvasRect = canvas.getBoundingClientRect();
+    const wrapperRect = document.getElementById('canvasWrapper').getBoundingClientRect();
+    const relativeX = (canvasRect.left - wrapperRect.left) + (progress * canvasRect.width);
+    playhead.style.left = `${relativeX}px`;
+    
+    scrubSlider.value = progress * 100;
+    document.getElementById('valScrub').textContent = Math.round(progress * 100) + '%';
+}
+
+// ==============================================================================
+// PROCESAMIENTO DE IMAGEN
+// ==============================================================================
+
 document.getElementById('imageInput').addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     const img = new Image();
     img.onload = () => {
-        // 1. Definir límites máximos de resolución para no saturar la CPU/GPU
         const MAX_WIDTH = 1600;
         const MAX_HEIGHT = 900;
 
         let targetWidth = img.width;
         let targetHeight = img.height;
 
-        // 2. Calcular escala manteniendo la PROPORCIÓN ORIGINAL de la imagen
         if (targetWidth > MAX_WIDTH || targetHeight > MAX_HEIGHT) {
             const ratio = Math.min(MAX_WIDTH / targetWidth, MAX_HEIGHT / targetHeight);
             targetWidth = Math.floor(targetWidth * ratio);
             targetHeight = Math.floor(targetHeight * ratio);
         }
 
-        // 3. Asignar la resolución interna real al canvas (¡Aquí está la magia!)
         canvas.width = targetWidth;
         canvas.height = targetHeight;
         state.width = targetWidth;
         state.height = targetHeight;
 
-        // 4. Dibujar la imagen a su resolución real (sin deformaciones)
         ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
         const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
         const data = imageData.data;
 
-        // 5. Procesar columnas basado en la nueva resolución real
         state.columnData = new Float32Array(targetWidth * CONFIG.bands);
         const bandHeight = targetHeight / CONFIG.bands;
 
@@ -374,248 +442,123 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
         
         state.imageData = imageData;
         state.scanX = 0;
+        state.lastLinealTime = 0; // Resetear timer
         
         document.getElementById('btnPlay').disabled = false;
         document.getElementById('btnExport').disabled = false;
-        statusText.textContent = `Imagen cargada (${targetWidth}x${targetHeight}px). Modo Armónico Activo.`;
+        statusText.textContent = `Imagen cargada (${targetWidth}x${targetHeight}px). Listo.`;
     };
     img.src = URL.createObjectURL(file);
 });
 
-// --- MOTOR DE REPRODUCCIÓN ---
-function play() {
-    if (!state.imageData) return;
-    initAudio();
-    if (state.audioCtx.state === 'suspended') state.audioCtx.resume();
+// ==============================================================================
+// EXPORTACIÓN A WAV (Offline Rendering Optimizado)
+// ==============================================================================
 
-    state.isPlaying = true;
-    state.startTime = state.audioCtx.currentTime;
-    state.scanX = 0;
-    state.lastRandomTime = 0;
-    
-    scrubSlider.value = 0;
-    document.getElementById('valScrub').textContent = '0%';
-    
-    document.getElementById('btnPlay').disabled = true;
-    document.getElementById('btnStop').disabled = false;
-    playhead.style.display = 'block';
-    statusText.textContent = "Tocando partitura gráfica...";
-
-    requestAnimationFrame(audioLoop);
-}
-
-function stop() {
-    state.isPlaying = false;
-    state.isScrubbing = false;
-    
-    document.getElementById('btnPlay').disabled = false;
-    document.getElementById('btnStop').disabled = true;
-    playhead.style.display = 'none';
-    statusText.textContent = "Detenido.";
-    
-    if (state.audioCtx) {
-        const now = state.audioCtx.currentTime;
-        state.gainNodes.forEach(g => g.gain.setTargetAtTime(0, now, 0.1));
-    }
-}
-
-function audioLoop() {
-    if (!state.isPlaying || !state.audioCtx) return;
-
-    let progress;
-
-    if (state.isScrubbing) {
-        const scrubValue = parseFloat(scrubSlider.value);
-        progress = scrubValue / 100;
-        updateAudioFromProgress(progress);
-        
-        const canvasRect = canvas.getBoundingClientRect();
-        const wrapperRect = document.getElementById('canvasWrapper').getBoundingClientRect();
-        const relativeX = (canvasRect.left - wrapperRect.left) + (progress * canvasRect.width);
-        playhead.style.left = `${relativeX}px`;
-        
-    } else {
-        const elapsed = state.audioCtx.currentTime - state.startTime;
-        
-        if (state.isPingPong) {
-            const cycleDuration = state.durationSec * 2;
-            const rawProgress = (elapsed % cycleDuration) / state.durationSec;
-            progress = rawProgress <= 1 ? rawProgress : 2 - rawProgress;
-        } else {
-            progress = (elapsed % state.durationSec) / state.durationSec;
-        }
-
-        if (!state.isLooping) {
-            if (state.isPingPong) {
-                if (elapsed >= state.durationSec * 2) { stop(); return; }
-            } else {
-                if (elapsed >= state.durationSec) { stop(); return; }
-            }
-        }
-
-        updateAudioFromProgress(progress);
-
-        const canvasRect = canvas.getBoundingClientRect();
-        const wrapperRect = document.getElementById('canvasWrapper').getBoundingClientRect();
-        const relativeX = (canvasRect.left - wrapperRect.left) + (progress * canvasRect.width);
-        playhead.style.left = `${relativeX}px`;
-
-        scrubSlider.value = progress * 100;
-        document.getElementById('valScrub').textContent = Math.round(progress * 100) + '%';
-    }
-
-    requestAnimationFrame(audioLoop);
-}
-
-// --- EXPORTACIÓN A WAV ---
 async function exportWAV() {
     if (!state.imageData) return;
-    statusText.textContent = "Renderizando pieza armónica...";
+    
+    const wasPlaying = state.isPlaying;
+    if (wasPlaying) stop(); 
+
+    statusText.textContent = "Renderizando audio de alta calidad...";
     document.getElementById('btnExport').disabled = true;
 
-    const duration = state.durationSec;
-    const offlineCtx = new OfflineAudioContext(1, CONFIG.sampleRate * duration, CONFIG.sampleRate);
-
-    const oscillators = [];
-    const gainNodes = [];
-    
-    const filter = offlineCtx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.Q.value = 0.7;
-    
-    const masterGain = offlineCtx.createGain();
-    masterGain.gain.value = state.masterVolume;
-    
-    filter.connect(masterGain);
-    masterGain.connect(offlineCtx.destination);
-
-    const lfo = offlineCtx.createOscillator();
-    const lfoGain = offlineCtx.createGain();
-    lfo.frequency.value = 0.5;
-    lfoGain.gain.value = 1.5;
-    lfo.connect(lfoGain);
-    lfo.start(0);
-
-    const rootHz = parseFloat(document.getElementById('selectRootNote').value) || 261.63;
-    const rootMidi = freqToMidi(rootHz);
-    const voicingType = document.getElementById('selectVoicing') ? (document.getElementById('selectVoicing').value || 'chord-melody') : 'chord-melody';
-
-    for (let i = 0; i < CONFIG.bands; i++) {
-        const osc = offlineCtx.createOscillator();
-        const gain = offlineCtx.createGain();
-        osc.type = 'triangle';
-        gain.gain.value = 0;
-        lfoGain.connect(osc.detune);
-        osc.connect(gain);
-        gain.connect(filter);
-        osc.start(0);
-        oscillators.push(osc);
-        gainNodes.push(gain);
-    }
-
-    const stepTime = 0.02;
-    let lastRandomExportTime = 0;
-    
-    for (let t = 0; t < duration; t += stepTime) {
-        let progress = t / duration;
+    try {
+        const duration = state.durationSec; 
+        const offlineCtx = new OfflineAudioContext(2, CONFIG.sampleRate * duration, CONFIG.sampleRate);
         
-        if (state.isRandom) {
-            if (t - lastRandomExportTime > 0.15) {
-                const chordFreqs = generateChordVoicing(Math.round(rootMidi), voicingType);
-                
-                const randX = Math.floor(Math.random() * state.width);
-                
-                const colOffset = randX * CONFIG.bands;
-                let weightedSum = 0;
-                let totalIntensity = 0;
-                let maxBright = 0;
+        const offFilter = new Tone.Filter({ type: "lowpass", frequency: 4000, Q: 0.7 }, offlineCtx);
+        const offDelay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.2, wet: 0.2 }, offlineCtx).connect(offFilter);
+        const offReverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }, offlineCtx).connect(offDelay);
+        offReverb.toDestination();
 
-                for (let b = 0; b < CONFIG.bands; b++) {
-                    let brightness = state.columnData[colOffset + b];
-                    if (state.isInverted) brightness = 1 - brightness;
-                    
-                    if (brightness > maxBright) maxBright = brightness;
+        const offRandomSynth = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: "triangle" },
+            envelope: { attack: 0.05, decay: 0.2, sustain: 0.3, release: 1.0 },
+            volume: -10
+        }, offlineCtx).connect(offFilter);
 
-                    if (brightness >= 0.05) {
-                        weightedSum += brightness * b;
-                        totalIntensity += brightness;
-                    }
-                }
-
-                if (totalIntensity > 0) {
-                    const geoBandIndex = Math.round(weightedSum / totalIntensity);
-                    
-                    if (geoBandIndex >= 0 && geoBandIndex < CONFIG.bands) {
-                        const noteOsc = offlineCtx.createOscillator();
-                        const noteGain = offlineCtx.createGain();
-                        const freq = chordFreqs[geoBandIndex] || midiToFreq(60);
-                        
-                        noteOsc.type = 'triangle';
-                        noteOsc.frequency.setValueAtTime(freq, t);
-                        
-                        const volume = Math.pow(maxBright, 1.5) * 0.4;
-                        const attack = 0.02;
-                        const decay = 0.3;
-                        
-                        noteGain.gain.setValueAtTime(0, t);
-                        noteGain.gain.linearRampToValueAtTime(volume, t + attack);
-                        noteGain.gain.exponentialRampToValueAtTime(0.001, t + attack + decay);
-                        
-                        noteOsc.connect(noteGain);
-                        noteGain.connect(filter);
-                        
-                        noteOsc.start(t);
-                        noteOsc.stop(t + attack + decay + 0.1);
-                    }
-                }
-                
-                for (let b = 0; b < CONFIG.bands; b++) {
-                    gainNodes[b].gain.setValueAtTime(0, t);
-                }
-                
-                lastRandomExportTime = t;
-            }
-        } else {
-            let x;
-            if (state.isLooping) progress = progress % 1;
-            else progress = Math.min(progress, 1);
-            x = Math.floor(progress * (state.width - 1));
-
-            const colOffset = x * CONFIG.bands;
-            let totalBrightness = 0;
-            const vals = [];
-
-            for (let b = 0; b < CONFIG.bands; b++) {
-                let brightness = state.columnData[colOffset + b];
-                if (state.isInverted) brightness = 1 - brightness;
-                vals.push(brightness);
-                totalBrightness += brightness;
-            }
-
-            const avgBrightness = totalBrightness / CONFIG.bands;
-            const chordFreqs = generateChordVoicing(Math.round(rootMidi), voicingType);
-            
-            for (let b = 0; b < CONFIG.bands; b++) {
-                oscillators[b].frequency.setValueAtTime(chordFreqs[b], t);
-                const dynGain = Math.pow(vals[b], 1.5) * 0.25;
-                gainNodes[b].gain.setValueAtTime(dynGain, t);
-            }
-
-            const cutoff = 800 + (avgBrightness * 6000 * state.filterAmount);
-            filter.frequency.setValueAtTime(cutoff, t);
+        // Voces fijas para exportación
+        const offLinealVoices = [];
+        const offLinealGains = [];
+        for (let i = 0; i < CONFIG.bands; i++) {
+            const gain = new Tone.Gain(0, offlineCtx).connect(offFilter);
+            const osc = new Tone.OmniOscillator({ type: "sine", volume: -5 }, offlineCtx).connect(gain).start();
+            offLinealVoices.push(osc);
+            offLinealGains.push(gain);
         }
-    }
 
-    const renderedBuffer = await offlineCtx.startRendering();
-    const wavBlob = bufferToWave(renderedBuffer, renderedBuffer.length);
-    const url = URL.createObjectURL(wavBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `catalina_geometric_${Date.now()}.wav`;
-    a.click();
-    
-    statusText.textContent = "¡Exportación completada!";
-    document.getElementById('btnExport').disabled = false;
+        const stepTime = 0.05;
+        let lastGenTime = 0;
+        let lastLinealTime = 0;
+        
+        const rootSelect = document.getElementById('selectRootNote');
+        const voicingSelect = document.getElementById('selectVoicing');
+        const rootHz = parseFloat(rootSelect ? rootSelect.value : 261.63) || 261.63;
+        const rootMidi = Math.round(freqToMidi(rootHz));
+        const voicingType = voicingSelect ? voicingSelect.value : 'chord-melody';
+        
+        const chordFreqs = generateChordVoicing(rootMidi, voicingType);
+
+        for (let t = 0; t < duration; t += stepTime) {
+            const progress = t / duration;
+            const xIndex = Math.floor(progress * (state.width - 1));
+            const colOffset = xIndex * CONFIG.bands;
+            
+            if (state.isGenerative) {
+                if (t - lastGenTime > 0.15) {
+                    const notesToTrigger = [];
+                    for (let b = 0; b < CONFIG.bands; b++) {
+                        let brightness = state.columnData[colOffset + b];
+                        if (state.isInverted) brightness = 1 - brightness;
+                        if (brightness > 0.15) {
+                            const velocity = Math.min(1, Math.pow(brightness, 1.2));
+                            const noteStr = Tone.Frequency(chordFreqs[b], "hz").toNote();
+                            notesToTrigger.push({ note: noteStr, velocity, duration: "16n" });
+                        }
+                    }
+                    if(notesToTrigger.length > 0) {
+                        notesToTrigger.slice(0, 3).forEach(v => {
+                            offRandomSynth.triggerAttackRelease(v.note, v.duration, t, v.velocity);
+                        });
+                    }
+                    lastGenTime = t;
+                }
+            } else {
+                if (t - lastLinealTime > 0.1) {
+                    for (let b = 0; b < CONFIG.bands; b++) {
+                        let brightness = state.columnData[colOffset + b];
+                        if (state.isInverted) brightness = 1 - brightness;
+                        
+                        offLinealVoices[b].frequency.rampTo(chordFreqs[b], 0.1, t);
+                        const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 1.2 : 0;
+                        offLinealGains[b].gain.rampTo(targetGain, 0.15, t);
+                    }
+                    lastLinealTime = t;
+                }
+            }
+        }
+
+        const renderedBuffer = await offlineCtx.startRendering();
+        const wavBlob = bufferToWave(renderedBuffer, renderedBuffer.length);
+        const url = URL.createObjectURL(wavBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `catalina_export_${Date.now()}.wav`;
+        a.click();
+        
+        statusText.textContent = "¡Exportación WAV completada!";
+        document.getElementById('btnExport').disabled = false;
+        
+        if(wasPlaying) play();
+
+    } catch (err) {
+        console.error(err);
+        statusText.textContent = "Error al exportar: " + err.message;
+        document.getElementById('btnExport').disabled = false;
+        if(wasPlaying) play();
+    }
 }
 
 function bufferToWave(abuffer, len) {
@@ -647,11 +590,12 @@ function bufferToWave(abuffer, len) {
     function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
 }
 
-// --- GESTIÓN DE MODOS ---
+// ==============================================================================
+// LISTENERS Y UI
+// ==============================================================================
+
 function setMode(mode) {
     state.currentMode = mode;
-    const sliderMin = document.getElementById('paramFreqMin');
-    const sliderMax = document.getElementById('paramFreqMax');
     const rootNoteContainer = document.getElementById('rootNoteContainer');
     const voicingContainer = document.getElementById('voicingContainer');
     const scaleContainer = document.getElementById('scaleContainer');
@@ -660,22 +604,15 @@ function setMode(mode) {
         if(rootNoteContainer) rootNoteContainer.classList.remove('hidden');
         if(voicingContainer) voicingContainer.classList.remove('hidden');
         if(scaleContainer) scaleContainer.classList.remove('hidden');
-        
-        sliderMin.disabled = false; sliderMax.disabled = false;
-        sliderMin.parentElement.style.opacity = '1'; sliderMax.parentElement.style.opacity = '1';
         statusText.textContent = "Modo Armónico: Control Total Activado.";
     } else {
         if(rootNoteContainer) rootNoteContainer.classList.add('hidden');
         if(voicingContainer) voicingContainer.classList.add('hidden');
         if(scaleContainer) scaleContainer.classList.add('hidden');
-        
-        sliderMin.disabled = false; sliderMax.disabled = false;
-        sliderMin.parentElement.style.opacity = '1'; sliderMax.parentElement.style.opacity = '1';
         statusText.textContent = "Modo Espectral: Control directo de Hz.";
     }
 }
 
-// --- EVENT LISTENERS ---
 document.getElementById('btnPlay').addEventListener('click', play);
 document.getElementById('btnStop').addEventListener('click', stop);
 document.getElementById('btnExport').addEventListener('click', exportWAV);
@@ -683,7 +620,24 @@ document.getElementById('btnExport').addEventListener('click', exportWAV);
 document.getElementById('toggleInvert').addEventListener('change', (e) => state.isInverted = e.target.checked);
 document.getElementById('toggleLoop').addEventListener('change', (e) => state.isLooping = e.target.checked);
 document.getElementById('togglePingPong').addEventListener('change', (e) => state.isPingPong = e.target.checked);
-document.getElementById('toggleRND').addEventListener('change', (e) => state.isRandom = e.target.checked);
+
+const genToggle = document.getElementById('toggleRND'); 
+if(genToggle) {
+    genToggle.addEventListener('change', (e) => {
+        state.isGenerative = e.target.checked;
+        
+        if(state.isPlaying) {
+             if (state.isGenerative) {
+                 // Silenciar voces lineales al entrar en random
+                 state.linealGains.forEach(g => g.gain.rampTo(0, 0.2));
+             } else {
+                 state.randomSynth.releaseAll();
+             }
+        }
+        
+        statusText.textContent = state.isGenerative ? "Modo Random Activo" : "Modo Lineal Activo";
+    });
+}
 
 document.getElementById('btnModeMusical').addEventListener('click', () => {
     if (state.currentMode !== 'musical') {
@@ -703,12 +657,13 @@ document.getElementById('btnModeSpectral').addEventListener('click', () => {
 
 document.getElementById('selectRootNote').addEventListener('change', () => { statusText.textContent = "Raíz armónica actualizada."; });
 if (document.getElementById('selectVoicing')) {
-    document.getElementById('selectVoicing').addEventListener('change', () => { statusText.textContent = "Textura armónica cambiada."; });
+    document.getElementById('selectVoicing').addEventListener('change', () => { 
+        statusText.textContent = `Textura: ${document.getElementById('selectVoicing').options[document.getElementById('selectVoicing').selectedIndex].text}`; 
+    });
 }
 if (document.getElementById('selectScale')) {
     document.getElementById('selectScale').addEventListener('change', () => {
-        const scaleSelect = document.getElementById('selectScale');
-        statusText.textContent = `Escala cambiada a: ${scaleSelect.options[scaleSelect.selectedIndex].text}`;
+        statusText.textContent = `Escala: ${document.getElementById('selectScale').options[document.getElementById('selectScale').selectedIndex].text}`;
     });
 }
 
@@ -727,33 +682,19 @@ document.getElementById('paramSpeed').addEventListener('input', (e) => {
 document.getElementById('paramFilter').addEventListener('input', (e) => {
     state.filterAmount = parseInt(e.target.value) / 100;
     document.getElementById('valFilter').textContent = e.target.value + '%';
+    updateFilterFrequency(state.filterAmount);
 });
 document.getElementById('paramVol').addEventListener('input', (e) => {
     state.masterVolume = parseInt(e.target.value) / 100;
     document.getElementById('valVol').textContent = e.target.value + '%';
-    if (state.masterGain) {
-        state.masterGain.gain.setTargetAtTime(state.masterVolume, state.audioCtx.currentTime, 0.02);
-    }
+    updateMasterVolume();
 });
 
 scrubSlider.addEventListener('pointerdown', () => { state.isScrubbing = true; });
-scrubSlider.addEventListener('pointerup', () => { 
-    state.isScrubbing = false; 
-    if (state.isPlaying) {
-        const progress = parseFloat(scrubSlider.value) / 100;
-        state.startTime = state.audioCtx.currentTime - (progress * state.durationSec);
-    }
-});
+scrubSlider.addEventListener('pointerup', () => { state.isScrubbing = false; });
 scrubSlider.addEventListener('touchstart', () => { state.isScrubbing = true; }, {passive: true});
-scrubSlider.addEventListener('touchend', () => { 
-    state.isScrubbing = false; 
-    if (state.isPlaying) {
-        const progress = parseFloat(scrubSlider.value) / 100;
-        state.startTime = state.audioCtx.currentTime - (progress * state.durationSec);
-    }
-});
+scrubSlider.addEventListener('touchend', () => { state.isScrubbing = false; });
 
-// --- MODO FULLSCREEN ---
 const btnFullscreen = document.getElementById('btnFullscreen');
 const canvasWrapper = document.getElementById('canvasWrapper');
 
@@ -761,8 +702,7 @@ if (btnFullscreen && canvasWrapper) {
     btnFullscreen.addEventListener('click', () => {
         if (!document.fullscreenElement) {
             canvasWrapper.requestFullscreen().catch(err => {
-                console.log(`Error al entrar en fullscreen: ${err.message}`);
-                statusText.textContent = "No se pudo activar pantalla completa.";
+                console.log(`Error fullscreen: ${err.message}`);
             });
         } else {
             document.exitFullscreen();
@@ -772,38 +712,17 @@ if (btnFullscreen && canvasWrapper) {
     document.addEventListener('fullscreenchange', () => {
         if (document.fullscreenElement) {
             canvasWrapper.classList.add('is-fullscreen');
-            statusText.textContent = "Modo pantalla completa activo. Presiona ESC para salir.";
         } else {
             canvasWrapper.classList.remove('is-fullscreen');
-            statusText.textContent = "Sistema listo. Esperando imagen...";
         }
     });
 }
 
-// --- SINCRONIZACIÓN INICIAL DE SLIDERS ---
 function syncSlidersInitialState() {
     const speedSlider = document.getElementById('paramSpeed');
     if (speedSlider) {
         speedSlider.value = state.durationSec;
         document.getElementById('valSpeed').textContent = state.durationSec.toFixed(1) + 's';
-    }
-    
-    const freqMinSlider = document.getElementById('paramFreqMin');
-    if (freqMinSlider) {
-        freqMinSlider.value = state.freqMin;
-        document.getElementById('valFreqMin').textContent = state.freqMin + ' Hz';
-    }
-    
-    const freqMaxSlider = document.getElementById('paramFreqMax');
-    if (freqMaxSlider) {
-        freqMaxSlider.value = state.freqMax;
-        document.getElementById('valFreqMax').textContent = state.freqMax + ' Hz';
-    }
-    
-    const filterSlider = document.getElementById('paramFilter');
-    if (filterSlider) {
-        filterSlider.value = state.filterAmount * 100;
-        document.getElementById('valFilter').textContent = (state.filterAmount * 100) + '%';
     }
     
     const volSlider = document.getElementById('paramVol');
@@ -812,10 +731,10 @@ function syncSlidersInitialState() {
         document.getElementById('valVol').textContent = (state.masterVolume * 100) + '%';
     }
     
-    const scrubSlider = document.getElementById('paramScrub');
-    if (scrubSlider) {
-        scrubSlider.value = 0;
-        document.getElementById('valScrub').textContent = '0%';
+    const filterSlider = document.getElementById('paramFilter');
+    if (filterSlider) {
+        filterSlider.value = state.filterAmount * 100;
+        document.getElementById('valFilter').textContent = (state.filterAmount * 100) + '%';
     }
 }
 
