@@ -536,3 +536,98 @@ button.secondary:hover { background: var(--accent-dim); }
     color: var(--accent);
     background: rgba(0, 255, 157, 0.1);
 }
+
+/* =========================================
+   CANVAS Y MODO FULLSCREEN
+   ========================================= */
+
+/* 1. Estilos base del canvas (Modo Normal) */
+#visualizer {
+    display: block;
+    width: 100%;
+    height: auto; /* Mantiene la proporción visualmente */
+    max-width: 100%;
+    background: #fff; /* Fondo blanco para que no se vea transparente */
+    border-radius: 4px; /* Opcional: si quieres bordes redondeados en modo normal */
+}
+
+/* 2. Botón de Fullscreen */
+.fullscreen-btn {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 0.5rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text);
+    transition: all 0.2s ease;
+    z-index: 30; /* Por encima del playhead y overlay */
+    backdrop-filter: blur(4px);
+}
+
+.fullscreen-btn:hover {
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
+    transform: scale(1.05);
+}
+
+.fullscreen-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+/* 3. Contenedor en Modo Fullscreen Activo */
+.canvas-wrapper.is-fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: var(--bg); /* Fondo blanco para integrarse con la imagen */
+    z-index: 9999;
+    padding: 0;
+    border-radius: 0;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 4. Canvas en Modo Fullscreen (Alta Resolución + Escalado Suave) */
+.canvas-wrapper.is-fullscreen #visualizer {
+    max-width: 95vw;
+    max-height: 90vh;
+    width: 100%;
+    height: auto;
+    object-fit: contain; /* Asegura que no se recorte ni deforme */
+    
+    /* Escalado suave y nítido (gracias a la resolución dinámica del JS) */
+    image-rendering: auto;
+    image-rendering: -webkit-optimize-contrast;
+}
+
+/* 5. Ajustes de elementos internos en Fullscreen */
+.canvas-wrapper.is-fullscreen .fullscreen-btn {
+    top: 1.5rem;
+    right: 1.5rem;
+    background: rgba(0, 0, 0, 0.6); /* Fondo oscuro para visibilidad sobre el canvas */
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.canvas-wrapper.is-fullscreen .fullscreen-btn:hover {
+    background: var(--accent);
+    color: #000;
+}
+
+.canvas-wrapper.is-fullscreen .playhead {
+    background: var(--accent);
+    box-shadow: 0 0 20px var(--accent), 0 0 40px rgba(0, 255, 157, 0.5);
+    width: 4px;
+}

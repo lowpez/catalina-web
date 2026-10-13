@@ -1,12 +1,12 @@
 /**
- * CATALINA WEB - Core Engine (Fase 3.9 - Random Geométrico Estable + Sync UI)
+ * CATALINA WEB - Core Engine (Fase 3.11 - Resolución Dinámica Proporcional + Fullscreen)
  * 
- * MEJORAS CLAVE:
- * 1. Modo Random ahora usa "Centroide Vertical": Si el cursor cae arriba del dibujo, suena agudo; abajo, grave.
- *    Esto hace que la melodía dependa realmente de la forma geométrica de la imagen.
- * 2. Corrección de Bug: Se arregló el error 'lfo is not defined' en initAudio().
- * 3. Sincronización UI: Al cargar la página, los sliders se fuerzan a mostrar el valor real del estado,
- *    evitando discrepancias visuales causadas por el autocompletado/restauración del navegador.
+ * CARACTERÍSTICAS:
+ * 1. Motor armónico con selector de escala y voicings.
+ * 2. Random Geométrico (mapea posición vertical del trazo a altura tonal).
+ * 3. Sincronización UI (sliders y toggles al recargar).
+ * 4. Modo Fullscreen con botón en esquina superior derecha.
+ * 5. NUEVO: Resolución de canvas dinámica y proporcional a la imagen original (sin deformaciones ni pixelación).
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -33,8 +33,8 @@ const state = {
     isScrubbing: false, 
     lastRandomTime: 0,
     
-    freqMin: 65.41,   // C2
-    freqMax: 1046.50, // C6
+    freqMin: 65.41,
+    freqMax: 1046.50,
     currentMode: 'musical',
     
     masterVolume: 0.7,
@@ -44,8 +44,8 @@ const state = {
     gainNodes: [],
     masterGain: null,
     filter: null,
-    lfo: null,      // CORRECCIÓN: Declaración explícita
-    lfoGain: null,  // CORRECCIÓN: Declaración explícita
+    lfo: null,
+    lfoGain: null,
     currentChordFreqs: [] 
 };
 
@@ -158,7 +158,6 @@ function initAudio() {
     state.filter.connect(state.masterGain);
     state.masterGain.connect(state.audioCtx.destination);
 
-    // CORRECCIÓN BUG FASE 3.8: Uso correcto de state.lfo y state.lfoGain
     state.lfo = state.audioCtx.createOscillator();
     state.lfoGain = state.audioCtx.createGain();
     state.lfo.frequency.value = 0.5;
@@ -201,40 +200,23 @@ function updateHarmony(dummyBrightness) {
     }
 }
 
-// --- HELPERS PARA EL SEQUENCER GEOMÉTRICO ---
-
-/**
- * NUEVA FUNCIÓN CLAVE:
- * Dado un índice de columna X, calcula dónde está el "centro de masa" visual.
- * Devuelve el índice de la nota del acorde (0-7) que mejor representa esa posición vertical.
- */
 function getGeometricBandIndex(colX) {
     const colOffset = colX * CONFIG.bands;
     let weightedSum = 0;
     let totalIntensity = 0;
     
-    // Recorremos las 8 bandas verticales de esa columna
     for (let b = 0; b < CONFIG.bands; b++) {
         let brightness = state.columnData[colOffset + b];
         if (state.isInverted) brightness = 1 - brightness;
         
-        // Ignoramos valores muy bajos para evitar ruido
         if (brightness < 0.05) continue;
-
-        // Peso: Cuanto más brillante, más cuenta
-        // Posición: b=0 es Arriba (Agudo?), b=7 es Abajo (Grave?)
-        // En nuestra escala, asumimos que índices altos = notas graves (depende del voicing, pero es consistente)
         
         weightedSum += brightness * b;
         totalIntensity += brightness;
     }
 
-    if (totalIntensity === 0) return -1; // Columna vacía
-
-    // Promedio ponderado de la posición vertical (0 a 7)
+    if (totalIntensity === 0) return -1;
     const avgVerticalPos = weightedSum / totalIntensity;
-    
-    // Redondear al índice entero más cercano (0, 1, ..., 7)
     return Math.round(avgVerticalPos);
 }
 
@@ -278,28 +260,17 @@ function restoreMainOscillators(columnValues, time) {
     }
 }
 
-// --- ACTUALIZAR AUDIO DESDE PROGRESO (MEJORADO) ---
 function updateAudioFromProgress(progress) {
     const now = state.audioCtx.currentTime;
     
     if (state.isRandom && !state.isScrubbing) {
-        // MODO RANDOM: Secuenciador Geométrico
-        
         if (!state.lastRandomTime || (now - state.lastRandomTime) > 0.15) {
-            
-            // 1. Actualizar armonía global (Raíz/Escala/Voicing siguen afectando)
             updateHarmony(0.5); 
             
-            // 2. Elegir posición X aleatoria
             const randX = Math.floor(Math.random() * state.width);
-            
-            // 3. OBTENER ÍNDICE BASADO EN LA GEOMETRÍA VERTICAL DEL TRAZO
-            // Esta es la clave: ya no usamos "la banda más brillante", 
-            // usamos "donde está concentrada la luz verticalmente".
             const geoBandIndex = getGeometricBandIndex(randX);
             
             if (geoBandIndex !== -1) {
-                // Calcular intensidad bruta de esa columna para el volumen
                 const colOffset = randX * CONFIG.bands;
                 let maxBright = 0;
                 for(let b=0; b<CONFIG.bands; b++){
@@ -308,12 +279,8 @@ function updateAudioFromProgress(progress) {
                      if(br > maxBright) maxBright = br;
                 }
 
-                // 4. Tocar la nota correspondiente
                 playSingleNote(geoBandIndex, maxBright, now);
                 
-                // 5. Filtro reactivo a la densidad general de la imagen (opcional, mantiene color)
-                // Usamos el brillo promedio de TODA la imagen actual para el filtro base
-                // Para simplificar, usamos el brillo de la columna seleccionada
                 const cutoff = 800 + (maxBright * 6000 * state.filterAmount);
                 state.filter.frequency.setTargetAtTime(cutoff, now, 0.1);
             }
@@ -324,7 +291,6 @@ function updateAudioFromProgress(progress) {
         forceSilenceMainOscillators(now);
 
     } else {
-        // MODO NORMAL: Escaneo Lineal Clásico
         state.scanX = Math.floor(progress * (state.width - 1));
         
         const colOffset = state.scanX * CONFIG.bands;
@@ -348,27 +314,43 @@ function updateAudioFromProgress(progress) {
     }
 }
 
-// --- PROCESAMIENTO DE IMAGEN ---
+// --- PROCESAMIENTO DE IMAGEN (RESOLUCIÓN DINÁMICA PROPORCIONAL) ---
 document.getElementById('imageInput').addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     const img = new Image();
     img.onload = () => {
-        const scale = Math.min(800 / img.width, 400 / img.height);
-        state.width = Math.floor(img.width * scale);
-        state.height = Math.floor(img.height * scale);
-        canvas.width = state.width;
-        canvas.height = state.height;
+        // 1. Definir límites máximos de resolución para no saturar la CPU/GPU
+        const MAX_WIDTH = 1600;
+        const MAX_HEIGHT = 900;
 
-        ctx.drawImage(img, 0, 0, state.width, state.height);
-        const imageData = ctx.getImageData(0, 0, state.width, state.height);
+        let targetWidth = img.width;
+        let targetHeight = img.height;
+
+        // 2. Calcular escala manteniendo la PROPORCIÓN ORIGINAL de la imagen
+        if (targetWidth > MAX_WIDTH || targetHeight > MAX_HEIGHT) {
+            const ratio = Math.min(MAX_WIDTH / targetWidth, MAX_HEIGHT / targetHeight);
+            targetWidth = Math.floor(targetWidth * ratio);
+            targetHeight = Math.floor(targetHeight * ratio);
+        }
+
+        // 3. Asignar la resolución interna real al canvas (¡Aquí está la magia!)
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        state.width = targetWidth;
+        state.height = targetHeight;
+
+        // 4. Dibujar la imagen a su resolución real (sin deformaciones)
+        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+        const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
         const data = imageData.data;
 
-        state.columnData = new Float32Array(state.width * CONFIG.bands);
-        const bandHeight = state.height / CONFIG.bands;
+        // 5. Procesar columnas basado en la nueva resolución real
+        state.columnData = new Float32Array(targetWidth * CONFIG.bands);
+        const bandHeight = targetHeight / CONFIG.bands;
 
-        for (let x = 0; x < state.width; x++) {
+        for (let x = 0; x < targetWidth; x++) {
             for (let b = 0; b < CONFIG.bands; b++) {
                 let totalBrightness = 0;
                 let pixelCount = 0;
@@ -376,7 +358,7 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
                 const yEnd = Math.floor((b + 1) * bandHeight);
 
                 for (let y = yStart; y < yEnd; y++) {
-                    const idx = (y * state.width + x) * 4;
+                    const idx = (y * targetWidth + x) * 4;
                     const brightness = (data[idx] * 0.299 + data[idx+1] * 0.587 + data[idx+2] * 0.114) / 255;
                     totalBrightness += brightness;
                     pixelCount++;
@@ -395,7 +377,7 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
         
         document.getElementById('btnPlay').disabled = false;
         document.getElementById('btnExport').disabled = false;
-        statusText.textContent = `Imagen cargada. Modo Armónico Activo.`;
+        statusText.textContent = `Imagen cargada (${targetWidth}x${targetHeight}px). Modo Armónico Activo.`;
     };
     img.src = URL.createObjectURL(file);
 });
@@ -485,7 +467,7 @@ function audioLoop() {
     requestAnimationFrame(audioLoop);
 }
 
-// --- EXPORTACIÓN A WAV (ACTUALIZADA CON LÓGICA GEOMÉTRICA) ---
+// --- EXPORTACIÓN A WAV ---
 async function exportWAV() {
     if (!state.imageData) return;
     statusText.textContent = "Renderizando pieza armónica...";
@@ -543,7 +525,6 @@ async function exportWAV() {
                 
                 const randX = Math.floor(Math.random() * state.width);
                 
-                // LÓGICA GEOMÉTRICA DUPLICADA PARA OFFLINE CONTEXT
                 const colOffset = randX * CONFIG.bands;
                 let weightedSum = 0;
                 let totalIntensity = 0;
@@ -772,39 +753,70 @@ scrubSlider.addEventListener('touchend', () => {
     }
 });
 
-// --- SINCRONIZACIÓN INICIAL DE SLIDERS (FIX UI BUG) ---
-// Forzar que los sliders reflejen los valores del estado al cargar
-function syncSlidersInitialState() {
-    // Velocidad
-    const speedSlider = document.getElementById('paramSpeed');
-    speedSlider.value = state.durationSec;
-    document.getElementById('valSpeed').textContent = state.durationSec.toFixed(1) + 's';
-    
-    // Frecuencia Mínima
-    const freqMinSlider = document.getElementById('paramFreqMin');
-    freqMinSlider.value = state.freqMin;
-    document.getElementById('valFreqMin').textContent = state.freqMin + ' Hz';
-    
-    // Frecuencia Máxima
-    const freqMaxSlider = document.getElementById('paramFreqMax');
-    freqMaxSlider.value = state.freqMax;
-    document.getElementById('valFreqMax').textContent = state.freqMax + ' Hz';
-    
-    // Filtro
-    const filterSlider = document.getElementById('paramFilter');
-    filterSlider.value = state.filterAmount * 100;
-    document.getElementById('valFilter').textContent = (state.filterAmount * 100) + '%';
-    
-    // Volumen
-    const volSlider = document.getElementById('paramVol');
-    volSlider.value = state.masterVolume * 100;
-    document.getElementById('valVol').textContent = (state.masterVolume * 100) + '%';
-    
-    // Scrub (siempre 0 al inicio)
-    const scrubSlider = document.getElementById('paramScrub');
-    scrubSlider.value = 0;
-    document.getElementById('valScrub').textContent = '0%';
+// --- MODO FULLSCREEN ---
+const btnFullscreen = document.getElementById('btnFullscreen');
+const canvasWrapper = document.getElementById('canvasWrapper');
+
+if (btnFullscreen && canvasWrapper) {
+    btnFullscreen.addEventListener('click', () => {
+        if (!document.fullscreenElement) {
+            canvasWrapper.requestFullscreen().catch(err => {
+                console.log(`Error al entrar en fullscreen: ${err.message}`);
+                statusText.textContent = "No se pudo activar pantalla completa.";
+            });
+        } else {
+            document.exitFullscreen();
+        }
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+        if (document.fullscreenElement) {
+            canvasWrapper.classList.add('is-fullscreen');
+            statusText.textContent = "Modo pantalla completa activo. Presiona ESC para salir.";
+        } else {
+            canvasWrapper.classList.remove('is-fullscreen');
+            statusText.textContent = "Sistema listo. Esperando imagen...";
+        }
+    });
 }
 
-// Ejecutar al cargar el DOM
+// --- SINCRONIZACIÓN INICIAL DE SLIDERS ---
+function syncSlidersInitialState() {
+    const speedSlider = document.getElementById('paramSpeed');
+    if (speedSlider) {
+        speedSlider.value = state.durationSec;
+        document.getElementById('valSpeed').textContent = state.durationSec.toFixed(1) + 's';
+    }
+    
+    const freqMinSlider = document.getElementById('paramFreqMin');
+    if (freqMinSlider) {
+        freqMinSlider.value = state.freqMin;
+        document.getElementById('valFreqMin').textContent = state.freqMin + ' Hz';
+    }
+    
+    const freqMaxSlider = document.getElementById('paramFreqMax');
+    if (freqMaxSlider) {
+        freqMaxSlider.value = state.freqMax;
+        document.getElementById('valFreqMax').textContent = state.freqMax + ' Hz';
+    }
+    
+    const filterSlider = document.getElementById('paramFilter');
+    if (filterSlider) {
+        filterSlider.value = state.filterAmount * 100;
+        document.getElementById('valFilter').textContent = (state.filterAmount * 100) + '%';
+    }
+    
+    const volSlider = document.getElementById('paramVol');
+    if (volSlider) {
+        volSlider.value = state.masterVolume * 100;
+        document.getElementById('valVol').textContent = (state.masterVolume * 100) + '%';
+    }
+    
+    const scrubSlider = document.getElementById('paramScrub');
+    if (scrubSlider) {
+        scrubSlider.value = 0;
+        document.getElementById('valScrub').textContent = '0%';
+    }
+}
+
 document.addEventListener('DOMContentLoaded', syncSlidersInitialState);
