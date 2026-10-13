@@ -1,14 +1,13 @@
 /**
- * CATALINA WEB - Core Engine v4.3 (Duración Objetivo de Exportación)
+ * CATALINA WEB - Core Engine v4.3.1 (Duración Objetivo de Exportación)
  * 
  * BASE: v4.2 (Entropía Melódica + Divulgación Progresiva)
  * NUEVO:
- * 1. Control de "Duración de Exportación" (1-300 segundos)
- * 2. Cálculo automático de repeticiones basado en velocidad de escaneo
- * 3. Semilla fija para repeticiones idénticas (modo ambiente/drone)
- * 4. Reemplazada la instanciación manual de OfflineAudioContext por Tone.Offline().
- * 5. Esto evita el error "getConstant is not a function" ya que Tone.Offline gestiona 
- *   internamente la vinculación segura de todos los nodos al contexto fuera de línea.
+ * 1. Control de "Duración de Exportación" (1-300 segundos) con formato dinámico (m s).
+ * 2. Semilla fija para repeticiones idénticas (modo ambiente/drone).
+ * 3. Reemplazada la instanciación manual de OfflineAudioContext por Tone.Offline().
+ * 4. Esto evita el error "getConstant is not a function" ya que Tone.Offline gestiona 
+ *    internamente la vinculación segura de todos los nodos al contexto fuera de línea.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -720,25 +719,35 @@ if (entropySlider) {
     });
 }
 
+// ✅ ACTUALIZADO: Formato dinámico de minutos y segundos
 const exportDurationInput = document.getElementById('paramExportDuration');
 if (exportDurationInput) {
     exportDurationInput.addEventListener('input', (e) => {
         let value = parseInt(e.target.value);
+        if (isNaN(value)) value = 0;
+        
+        // Validar límites
         value = Math.max(1, Math.min(300, value));
         state.exportDuration = value;
-        document.getElementById('valExportDuration').textContent = value + 's';
         
-        const loopCount = Math.ceil(value / state.durationSec);
-        document.getElementById('valLoopCount').textContent = loopCount;
+        // Lógica dinámica: Minutos y Segundos
+        let displayText = '';
+        if (value >= 60) {
+            const minutes = Math.floor(value / 60);
+            const seconds = value % 60;
+            displayText = `${minutes}m ${seconds}s`;
+        } else {
+            displayText = `${value}s`;
+        }
+        
+        document.getElementById('valExportDuration').textContent = displayText;
     });
 }
 
+// ✅ ACTUALIZADO: Se eliminó la actualización de valLoopCount
 document.getElementById('paramSpeed').addEventListener('input', (e) => {
     state.durationSec = parseFloat(e.target.value);
     document.getElementById('valSpeed').textContent = state.durationSec.toFixed(1) + 's';
-    
-    const loopCount = Math.ceil(state.exportDuration / state.durationSec);
-    document.getElementById('valLoopCount').textContent = loopCount;
 });
 
 document.getElementById('btnModeMusical').addEventListener('click', () => {
@@ -816,6 +825,7 @@ if (btnFullscreen && canvasWrapper) {
     });
 }
 
+// ✅ ACTUALIZADO: Sincronización inicial con formato dinámico
 function syncSlidersInitialState() {
     const speedSlider = document.getElementById('paramSpeed');
     if (speedSlider) {
@@ -844,10 +854,16 @@ function syncSlidersInitialState() {
     const exportDurationInput = document.getElementById('paramExportDuration');
     if (exportDurationInput) {
         exportDurationInput.value = state.exportDuration;
-        document.getElementById('valExportDuration').textContent = state.exportDuration + 's';
         
-        const loopCount = Math.ceil(state.exportDuration / state.durationSec);
-        document.getElementById('valLoopCount').textContent = loopCount;
+        let displayText = '';
+        if (state.exportDuration >= 60) {
+            const minutes = Math.floor(state.exportDuration / 60);
+            const seconds = state.exportDuration % 60;
+            displayText = `${minutes}m ${seconds}s`;
+        } else {
+            displayText = `${state.exportDuration}s`;
+        }
+        document.getElementById('valExportDuration').textContent = displayText;
     }
 }
 

@@ -682,8 +682,8 @@ button.secondary:hover { background: var(--accent-dim); }
     border-radius: 4px;
     font-family: inherit;
     font-size: 0.9rem;
-    background: var(--bg-input, #fff);
-    color: var(--text, #333);
+    background: var(--input-bg);
+    color: var(--input-text);
     margin-top: 0.5rem;
 }
 
