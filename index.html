@@ -62,6 +62,17 @@
                         <span class="toggle-text">RANDOM</span>
                     </label>
                 </div>
+				<!-- NUEVO: Controles Generativos (Divulgación Progresiva) -->
+                <div class="generative-controls" id="generativeControls">
+                    <div class="control-group">
+                        <label>Entropía <span class="value-display" id="valEntropy">50%</span></label>
+                        <input type="range" id="paramEntropy" min="0" max="100" step="1" value="50">
+                        <div class="entropy-labels">
+                            <span class="entropy-label-left">Suave</span>
+                            <span class="entropy-label-right">Caótico</span>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- SECCIÓN 2: CONTROLES PRINCIPALES -->

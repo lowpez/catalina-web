@@ -1,15 +1,13 @@
 /**
- * CATALINA WEB - Core Engine v4.1 (Random Anti-Saturation Fix)
+ * CATALINA WEB - Core Engine v4.2 (Entropía Melódica + Divulgación Progresiva)
  * 
- * CORRECCIÓN CRÍTICA:
- * El modo Generativo saturaba porque acumulaba ~20 notas simultáneas 
- * (3 notas cada 150ms con release de 1s).
- * 
- * Solución:
- * 1. maxPolyphony: 4 (límite estricto de voces simultáneas)
- * 2. voiceStealing: "oldest" (cortar notas antiguas automáticamente)
- * 3. release: 0.4 (decaimiento más rápido)
- * 4. Throttle: 200ms (más espacio entre disparos)
+ * BASE: v4.1 (Tone.js Migration + Generative Music)
+ * NUEVO:
+ * 1. Control de "Entropía" (0-100%) que combina:
+ *    - Caos Melódico: Caminata suave (±1 grado) vs Saltos libres
+ *    - Textura: Release largo (2s, pad) vs Release corto (0.3s, percusivo)
+ *    - Densidad: Probabilidad de disparo (100% vs 20%)
+ * 2. Divulgación Progresiva: El slider de Entropía se despliega solo al activar RANDOM
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -40,6 +38,10 @@ const state = {
     filterAmount: 0.5,
     freqMin: 65.41,
     freqMax: 1046.50,
+    
+    // NUEVO: Control de Entropía (0 a 1)
+    entropy: 0.5,
+    lastNoteIndex: -1, // Para caminata melódica
     
     randomSynth: null,
     linealVoices: [],
@@ -118,6 +120,38 @@ function generateChordVoicing(rootMidi, voicingType) {
     return chordFreqs;
 }
 
+// NUEVO: Función para seleccionar nota con entropía (caminata melódica)
+function selectNoteWithEntropy(chordFreqs, scaleName) {
+    const scaleIntervals = SCALES[scaleName] || SCALES.lydian;
+    const scaleLength = scaleIntervals.length;
+    
+    // Calcular índice de nota actual en la escala
+    let currentIndex = state.lastNoteIndex;
+    if (currentIndex < 0 || currentIndex >= scaleLength) {
+        currentIndex = Math.floor(scaleLength / 2); // Empezar en el medio
+    }
+    
+    // Calcular rango de movimiento basado en entropía
+    // Entropía 0: ±1 grado (caminata suave)
+    // Entropía 1: cualquier nota (salto libre)
+    const maxJump = Math.floor(state.entropy * (scaleLength - 1));
+    const minJump = -maxJump;
+    
+    // Generar salto aleatorio dentro del rango permitido
+    const jump = Math.floor(Math.random() * (maxJump - minJump + 1)) + minJump;
+    let newIndex = currentIndex + jump;
+    
+    // Asegurar que el índice esté dentro de los límites
+    newIndex = Math.max(0, Math.min(newIndex, scaleLength - 1));
+    
+    // Actualizar estado
+    state.lastNoteIndex = newIndex;
+    
+    // Seleccionar la frecuencia correspondiente
+    const selectedFreq = chordFreqs[newIndex % chordFreqs.length];
+    return { freq: selectedFreq, index: newIndex };
+}
+
 // --- ELEMENTOS DOM ---
 const canvas = document.getElementById('visualizer');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -166,19 +200,18 @@ async function initAudio() {
         Q: 0.7
     }).connect(state.delay);
 
-    // 2. ✅ Sintetizador para Modo Random CON LÍMITE DE POLIFONÍA
+    // 2. Sintetizador para Modo Random (con entropía dinámica)
     state.randomSynth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: "triangle" },
         envelope: { 
             attack: 0.05, 
             decay: 0.2, 
             sustain: 0.3, 
-            release: 0.4 // ✅ Reducido de 1.0 a 0.4 para evitar acumulación
+            release: 1.0 // Se ajustará dinámicamente según entropía
         },
         volume: -10,
-        // ✅ LÍMITES CRÍTICOS PARA EVITAR SATURACIÓN
-        maxPolyphony: 4, // Máximo 4 notas simultáneas
-        voiceStealing: "oldest" // Cortar las notas más antiguas primero
+        maxPolyphony: 4,
+        voiceStealing: "oldest"
     }).connect(state.filter);
 
     // 3. 8 Voces Fijas para Modo Lineal
@@ -211,8 +244,19 @@ function updateFilterFrequency(intensity) {
     state.filter.frequency.rampTo(freq, 0.1);
 }
 
+// NUEVO: Actualizar parámetros del synth según entropía
+function updateEntropyParameters() {
+    if (!state.randomSynth) return;
+    
+    // Interpolar release: 2.0s (entropía 0) a 0.3s (entropía 1)
+    const releaseTime = 2.0 - (state.entropy * 1.7);
+    state.randomSynth.set({
+        envelope: { release: releaseTime }
+    });
+}
+
 // ==============================================================================
-// LÓGICA DE REPRODUCCIÓN (OPTIMIZADA)
+// LÓGICA DE REPRODUCCIÓN (CON ENTROPÍA)
 // ==============================================================================
 
 function processColumnForMusic(xIndex, currentTime) {
@@ -227,22 +271,34 @@ function processColumnForMusic(xIndex, currentTime) {
     const rootHz = parseFloat(rootSelect ? rootSelect.value : 261.63) || 261.63;
     const rootMidi = Math.round(freqToMidi(rootHz));
     const voicingType = voicingSelect ? voicingSelect.value : 'chord-melody';
+    const scaleName = scaleSelect ? scaleSelect.value : 'lydian';
     
     const chordFreqs = generateChordVoicing(rootMidi, voicingType);
 
     if (state.isGenerative) {
-        // --- MODO RANDOM (Staccato/Rítmico) ---
-        // ✅ Throttle aumentado a 200ms para dar más espacio entre notas
-        if (currentTime - state.lastGenTime > 0.2) {
+        // --- MODO RANDOM CON ENTROPÍA ---
+        // Calcular probabilidad de disparo basada en entropía
+        // Entropía 0: 100% probabilidad, Entropía 1: 20% probabilidad
+        const triggerProbability = 1.0 - (state.entropy * 0.8);
+        
+        // Throttle dinámico: más lento con entropía baja, más rápido con alta
+        const throttleTime = 0.2 + (state.entropy * 0.1); // 200ms a 300ms
+        
+        if (currentTime - state.lastGenTime > throttleTime) {
             const notesToTrigger = [];
             
             for (let b = 0; b < CONFIG.bands; b++) {
                 let brightness = state.columnData[colOffset + b];
                 if (state.isInverted) brightness = 1 - brightness;
                 
-                if (brightness > 0.15) {
+                // Aplicar probabilidad de entropía
+                if (brightness > 0.15 && Math.random() < triggerProbability) {
                     const velocity = Math.min(1, Math.pow(brightness, 1.2));
-                    const noteStr = Tone.Frequency(chordFreqs[b], "hz").toNote();
+                    
+                    // NUEVO: Seleccionar nota con caminata melódica basada en entropía
+                    const { freq } = selectNoteWithEntropy(chordFreqs, scaleName);
+                    const noteStr = Tone.Frequency(freq, "hz").toNote();
+                    
                     notesToTrigger.push({
                         note: noteStr,
                         time: currentTime,
@@ -253,7 +309,7 @@ function processColumnForMusic(xIndex, currentTime) {
             }
 
             if (notesToTrigger.length > 0) {
-                // ✅ Limitar a 2 voces simultáneas máximo (más conservador)
+                // Limitar a 2 voces simultáneas
                 notesToTrigger.slice(0, 2).forEach(v => {
                     state.randomSynth.triggerAttackRelease(v.note, v.duration, v.time, v.velocity);
                 });
@@ -261,7 +317,7 @@ function processColumnForMusic(xIndex, currentTime) {
             state.lastGenTime = currentTime;
         }
     } else {
-        // --- MODO LINEAL (8 Voces Fijas con Modulación de Ganancia) ---
+        // --- MODO LINEAL (8 Voces Fijas) ---
         for (let b = 0; b < CONFIG.bands; b++) {
             let brightness = state.columnData[colOffset + b];
             if (state.isInverted) brightness = 1 - brightness;
@@ -292,6 +348,7 @@ async function play() {
     state.scanX = 0;
     state.lastGenTime = 0;
     state.lastLinealTime = 0;
+    state.lastNoteIndex = -1; // Resetear caminata melódica
     
     if(state.randomSynth) state.randomSynth.releaseAll();
     if(state.linealGains) {
@@ -448,7 +505,7 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
 });
 
 // ==============================================================================
-// EXPORTACIÓN A WAV (Offline Rendering Optimizado)
+// EXPORTACIÓN A WAV (CON ENTROPÍA)
 // ==============================================================================
 
 async function exportWAV() {
@@ -469,10 +526,12 @@ async function exportWAV() {
         const offReverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }, offlineCtx).connect(offDelay);
         offReverb.toDestination();
 
-        // ✅ Mismos límites de polifonía en exportación
+        // Calcular release basado en entropía
+        const releaseTime = 2.0 - (state.entropy * 1.7);
+        
         const offRandomSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "triangle" },
-            envelope: { attack: 0.05, decay: 0.2, sustain: 0.3, release: 0.4 },
+            envelope: { attack: 0.05, decay: 0.2, sustain: 0.3, release: releaseTime },
             volume: -10,
             maxPolyphony: 4,
             voiceStealing: "oldest"
@@ -490,12 +549,15 @@ async function exportWAV() {
         const stepTime = 0.05;
         let lastGenTime = 0;
         let lastLinealTime = 0;
+        let lastNoteIndex = -1;
         
         const rootSelect = document.getElementById('selectRootNote');
         const voicingSelect = document.getElementById('selectVoicing');
+        const scaleSelect = document.getElementById('selectScale');
         const rootHz = parseFloat(rootSelect ? rootSelect.value : 261.63) || 261.63;
         const rootMidi = Math.round(freqToMidi(rootHz));
         const voicingType = voicingSelect ? voicingSelect.value : 'chord-melody';
+        const scaleName = scaleSelect ? scaleSelect.value : 'lydian';
         
         const chordFreqs = generateChordVoicing(rootMidi, voicingType);
 
@@ -505,17 +567,36 @@ async function exportWAV() {
             const colOffset = xIndex * CONFIG.bands;
             
             if (state.isGenerative) {
-                if (t - lastGenTime > 0.2) {
+                const triggerProbability = 1.0 - (state.entropy * 0.8);
+                const throttleTime = 0.2 + (state.entropy * 0.1);
+                
+                if (t - lastGenTime > throttleTime) {
                     const notesToTrigger = [];
+                    
                     for (let b = 0; b < CONFIG.bands; b++) {
                         let brightness = state.columnData[colOffset + b];
                         if (state.isInverted) brightness = 1 - brightness;
-                        if (brightness > 0.15) {
+                        
+                        if (brightness > 0.15 && Math.random() < triggerProbability) {
                             const velocity = Math.min(1, Math.pow(brightness, 1.2));
-                            const noteStr = Tone.Frequency(chordFreqs[b], "hz").toNote();
+                            
+                            // Caminata melódica con entropía
+                            const scaleIntervals = SCALES[scaleName] || SCALES.lydian;
+                            const scaleLength = scaleIntervals.length;
+                            
+                            if (lastNoteIndex < 0) lastNoteIndex = Math.floor(scaleLength / 2);
+                            
+                            const maxJump = Math.floor(state.entropy * (scaleLength - 1));
+                            const jump = Math.floor(Math.random() * (maxJump * 2 + 1)) - maxJump;
+                            lastNoteIndex = Math.max(0, Math.min(lastNoteIndex + jump, scaleLength - 1));
+                            
+                            const freq = chordFreqs[lastNoteIndex % chordFreqs.length];
+                            const noteStr = Tone.Frequency(freq, "hz").toNote();
+                            
                             notesToTrigger.push({ note: noteStr, velocity, duration: "16n" });
                         }
                     }
+                    
                     if(notesToTrigger.length > 0) {
                         notesToTrigger.slice(0, 2).forEach(v => {
                             offRandomSynth.triggerAttackRelease(v.note, v.duration, t, v.velocity);
@@ -619,10 +700,20 @@ document.getElementById('toggleInvert').addEventListener('change', (e) => state.
 document.getElementById('toggleLoop').addEventListener('change', (e) => state.isLooping = e.target.checked);
 document.getElementById('togglePingPong').addEventListener('change', (e) => state.isPingPong = e.target.checked);
 
-const genToggle = document.getElementById('toggleRND'); 
+// NUEVO: Toggle RANDOM con Divulgación Progresiva
+const genToggle = document.getElementById('toggleRND');
+const generativeControls = document.getElementById('generativeControls');
+
 if(genToggle) {
     genToggle.addEventListener('change', (e) => {
         state.isGenerative = e.target.checked;
+        
+        // Divulgación Progresiva: mostrar/ocultar controles de entropía
+        if (state.isGenerative) {
+            generativeControls.classList.add('active');
+        } else {
+            generativeControls.classList.remove('active');
+        }
         
         if(state.isPlaying) {
              if (state.isGenerative) {
@@ -633,6 +724,19 @@ if(genToggle) {
         }
         
         statusText.textContent = state.isGenerative ? "Modo Random Activo" : "Modo Lineal Activo";
+    });
+}
+
+// NUEVO: Slider de Entropía
+const entropySlider = document.getElementById('paramEntropy');
+if (entropySlider) {
+    entropySlider.addEventListener('input', (e) => {
+        const entropyPercent = parseInt(e.target.value);
+        state.entropy = entropyPercent / 100;
+        document.getElementById('valEntropy').textContent = entropyPercent + '%';
+        
+        // Actualizar parámetros del synth en tiempo real
+        updateEntropyParameters();
     });
 }
 
@@ -732,6 +836,13 @@ function syncSlidersInitialState() {
     if (filterSlider) {
         filterSlider.value = state.filterAmount * 100;
         document.getElementById('valFilter').textContent = (state.filterAmount * 100) + '%';
+    }
+    
+    // NUEVO: Sincronizar slider de Entropía
+    const entropySlider = document.getElementById('paramEntropy');
+    if (entropySlider) {
+        entropySlider.value = state.entropy * 100;
+        document.getElementById('valEntropy').textContent = Math.round(state.entropy * 100) + '%';
     }
 }
 

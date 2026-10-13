@@ -631,3 +631,42 @@ button.secondary:hover { background: var(--accent-dim); }
     box-shadow: 0 0 20px var(--accent), 0 0 40px rgba(0, 255, 157, 0.5);
     width: 4px;
 }
+
+/* =========================================
+   CONTROLES GENERATIVOS (Divulgación Progresiva)
+   ========================================= */
+
+.generative-controls {
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-out, opacity 0.3s ease-out, margin 0.3s ease-out;
+    margin-top: 0;
+}
+
+.generative-controls.active {
+    max-height: 120px;
+    opacity: 1;
+    margin-top: 1rem;
+}
+
+.generative-controls .control-group {
+    margin-bottom: 0.5rem;
+}
+
+.entropy-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: var(--text-muted, #888);
+    margin-top: 0.25rem;
+    font-style: italic;
+}
+
+.entropy-label-left {
+    color: #6ec6ff;
+}
+
+.entropy-label-right {
+    color: #ff6b6b;
+}
