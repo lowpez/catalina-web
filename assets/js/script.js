@@ -1,13 +1,12 @@
 /**
- * CATALINA WEB - Core Engine v4.3.1 (Duración Objetivo de Exportación)
+ * CATALINA WEB - Core Engine v4.3.2 (Compresor de Audio + Sensibilidad Mejorada)
  * 
- * BASE: v4.2 (Entropía Melódica + Divulgación Progresiva)
+ * BASE: v4.3.1 (UX Dinámica + Exportación Robusta)
  * NUEVO:
- * 1. Control de "Duración de Exportación" (1-300 segundos) con formato dinámico (m s).
- * 2. Semilla fija para repeticiones idénticas (modo ambiente/drone).
- * 3. Reemplazada la instanciación manual de OfflineAudioContext por Tone.Offline().
- * 4. Esto evita el error "getConstant is not a function" ya que Tone.Offline gestiona 
- *    internamente la vinculación segura de todos los nodos al contexto fuera de línea.
+ * 1. Compresor de audio (Tone.Compressor) para equilibrar volúmenes de líneas delgadas y gruesas.
+ * 2. Curva de respuesta ajustada: umbral más bajo (0.01) y exponente 0.8 para mayor sensibilidad.
+ * 3. Las líneas finas (1-2px) ahora son audibles sin perder la naturaleza armónica original.
+ * 4. Compresor aplicado tanto en reproducción en vivo como en exportación WAV.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -47,6 +46,7 @@ const state = {
     linealVoices: [],
     linealGains: [],
     filter: null,
+    compressor: null, // NUEVO: Compresor de audio
     reverb: null,
     delay: null,
     lastGenTime: 0,
@@ -165,7 +165,7 @@ function drawBandsOverlay() {
 }
 
 // ==============================================================================
-// MOTOR DE AUDIO CON TONE.JS
+// MOTOR DE AUDIO CON TONE.JS (CON COMPRESOR)
 // ==============================================================================
 
 async function initAudio() {
@@ -186,7 +186,19 @@ async function initAudio() {
         type: "lowpass",
         frequency: 4000,
         Q: 0.7
-    }).connect(state.delay);
+    });
+
+    // ✅ NUEVO: Compresor de audio para equilibrar líneas delgadas y gruesas
+    state.compressor = new Tone.Compressor({
+        threshold: -24,    // dB: comienza a comprimir por encima de este nivel
+        ratio: 4.5,        // 4.5:1 de compresión
+        attack: 0.003,     // ataque rápido
+        release: 0.25      // release suave
+    });
+    
+    // Cadena: Filter -> Compressor -> Delay -> Reverb -> Destination
+    state.filter.connect(state.compressor);
+    state.compressor.connect(state.delay);
 
     state.randomSynth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: "triangle" },
@@ -234,7 +246,7 @@ function updateEntropyParameters() {
 }
 
 // ==============================================================================
-// LÓGICA DE REPRODUCCIÓN
+// LÓGICA DE REPRODUCCIÓN (CON SENSIBILIDAD MEJORADA)
 // ==============================================================================
 
 function processColumnForMusic(xIndex, currentTime) {
@@ -264,7 +276,8 @@ function processColumnForMusic(xIndex, currentTime) {
                 let brightness = state.columnData[colOffset + b];
                 if (state.isInverted) brightness = 1 - brightness;
                 
-                if (brightness > 0.15 && Math.random() < triggerProbability) {
+                // ✅ MEJORADO: Umbral más bajo (0.01) para detectar líneas delgadas
+                if (brightness > 0.01 && Math.random() < triggerProbability) {
                     const velocity = Math.min(1, Math.pow(brightness, 1.2));
                     const { freq } = selectNoteWithEntropy(chordFreqs, scaleName);
                     const noteStr = Tone.Frequency(freq, "hz").toNote();
@@ -291,7 +304,8 @@ function processColumnForMusic(xIndex, currentTime) {
             if (state.isInverted) brightness = 1 - brightness;
             
             state.linealVoices[b].frequency.rampTo(chordFreqs[b], 0.1);
-            const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 1.2 : 0;
+            // ✅ MEJORADO: Umbral más bajo (0.01) y curva más sensible (0.8)
+            const targetGain = brightness > 0.01 ? Math.pow(brightness, 0.8) * 1.5 : 0;
             state.linealGains[b].gain.rampTo(targetGain, 0.15);
         }
     }
@@ -473,7 +487,7 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
 });
 
 // ==============================================================================
-// EXPORTACIÓN A WAV (CORREGIDA CON TONE.OFFLINE)
+// EXPORTACIÓN A WAV (CON COMPRESOR)
 // ==============================================================================
 
 async function exportWAV() {
@@ -488,15 +502,23 @@ async function exportWAV() {
     try {
         const exportDuration = state.exportDuration;
         
-        // ✅ CORRECCIÓN: Tone.Offline es la forma oficial y segura de renderizar 
-        // fuera de línea en Tone.js. Gestiona el contexto internamente, evitando 
-        // por completo errores como "getConstant is not a function".
         const renderedBuffer = await Tone.Offline(async () => {
             
-            // 1. Configurar cadena de efectos (se vinculan automáticamente al contexto offline)
+            // 1. Configurar cadena de efectos con compresor
             const offReverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }).toDestination();
             const offDelay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.2, wet: 0.2 }).connect(offReverb);
-            const offFilter = new Tone.Filter({ type: "lowpass", frequency: 4000, Q: 0.7 }).connect(offDelay);
+            const offFilter = new Tone.Filter({ type: "lowpass", frequency: 4000, Q: 0.7 });
+            
+            // ✅ NUEVO: Compresor en exportación
+            const offCompressor = new Tone.Compressor({
+                threshold: -24,
+                ratio: 4.5,
+                attack: 0.003,
+                release: 0.25
+            });
+            
+            offFilter.connect(offCompressor);
+            offCompressor.connect(offDelay);
 
             const releaseTime = 2.0 - (state.entropy * 1.7);
             
@@ -559,7 +581,8 @@ async function exportWAV() {
                             
                             const seedRandom = Math.sin(t * 1000 + b) * 0.5 + 0.5;
                             
-                            if (brightness > 0.15 && seedRandom < triggerProbability) {
+                            // ✅ MEJORADO: Umbral más bajo (0.01)
+                            if (brightness > 0.01 && seedRandom < triggerProbability) {
                                 const velocity = Math.min(1, Math.pow(brightness, 1.2));
                                 
                                 const scaleIntervals = SCALES[scaleName] || SCALES.lydian;
@@ -593,7 +616,8 @@ async function exportWAV() {
                             if (state.isInverted) brightness = 1 - brightness;
                             
                             offLinealVoices[b].frequency.rampTo(chordFreqs[b], 0.1, t);
-                            const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 1.2 : 0;
+                            // ✅ MEJORADO: Umbral más bajo (0.01) y curva más sensible (0.8)
+                            const targetGain = brightness > 0.01 ? Math.pow(brightness, 0.8) * 1.5 : 0;
                             offLinealGains[b].gain.rampTo(targetGain, 0.15, t);
                         }
                         lastLinealTime = t;
@@ -601,7 +625,7 @@ async function exportWAV() {
                 }
             }
             
-        }, exportDuration); // <-- Duración total en segundos
+        }, exportDuration);
 
         // 3. Convertir el buffer renderizado a WAV
         const wavBlob = bufferToWave(renderedBuffer, renderedBuffer.length);
@@ -719,18 +743,15 @@ if (entropySlider) {
     });
 }
 
-// ✅ ACTUALIZADO: Formato dinámico de minutos y segundos
 const exportDurationInput = document.getElementById('paramExportDuration');
 if (exportDurationInput) {
     exportDurationInput.addEventListener('input', (e) => {
         let value = parseInt(e.target.value);
         if (isNaN(value)) value = 0;
         
-        // Validar límites
         value = Math.max(1, Math.min(300, value));
         state.exportDuration = value;
         
-        // Lógica dinámica: Minutos y Segundos
         let displayText = '';
         if (value >= 60) {
             const minutes = Math.floor(value / 60);
@@ -744,7 +765,6 @@ if (exportDurationInput) {
     });
 }
 
-// ✅ ACTUALIZADO: Se eliminó la actualización de valLoopCount
 document.getElementById('paramSpeed').addEventListener('input', (e) => {
     state.durationSec = parseFloat(e.target.value);
     document.getElementById('valSpeed').textContent = state.durationSec.toFixed(1) + 's';
@@ -825,7 +845,6 @@ if (btnFullscreen && canvasWrapper) {
     });
 }
 
-// ✅ ACTUALIZADO: Sincronización inicial con formato dinámico
 function syncSlidersInitialState() {
     const speedSlider = document.getElementById('paramSpeed');
     if (speedSlider) {
