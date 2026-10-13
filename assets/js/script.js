@@ -1,11 +1,15 @@
 /**
- * CATALINA WEB - Core Engine v4.0 (Tone.js Migration + Generative Music)
+ * CATALINA WEB - Core Engine v4.1 (Random Anti-Saturation Fix)
  * 
- * BASE: Fase 3.11 (Resolución Dinámica Proporcional + Fullscreen)
- * CAMBIOS CLAVE:
- * 1. Motor de audio migrado a Tone.js (elimina clipping/aliasing nativo).
- * 2. Nuevo modo "Generative": Compón música reactiva basada en la imagen escaneada.
- * 3. Sincronización precisa mediante Tone.Transport.
+ * CORRECCIÓN CRÍTICA:
+ * El modo Generativo saturaba porque acumulaba ~20 notas simultáneas 
+ * (3 notas cada 150ms con release de 1s).
+ * 
+ * Solución:
+ * 1. maxPolyphony: 4 (límite estricto de voces simultáneas)
+ * 2. voiceStealing: "oldest" (cortar notas antiguas automáticamente)
+ * 3. release: 0.4 (decaimiento más rápido)
+ * 4. Throttle: 200ms (más espacio entre disparos)
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -27,7 +31,7 @@ const state = {
     isInverted: true,
     isLooping: true,
     isPingPong: true,
-    isGenerative: false, // FALSE = Lineal, TRUE = Random
+    isGenerative: false,
     isScrubbing: false,
     
     currentMode: 'musical',
@@ -37,14 +41,14 @@ const state = {
     freqMin: 65.41,
     freqMax: 1046.50,
     
-    // Elementos Tone.js
-    randomSynth: null,   // Para modo Random (Staccato)
-    linealVoices: [],    // 8 Osciladores fijos para modo Lineal (Ultra estable)
-    linealGains: [],     // 8 Nodos de ganancia para modular volumen suavemente
+    randomSynth: null,
+    linealVoices: [],
+    linealGains: [],
     filter: null,
     reverb: null,
     delay: null,
-    lastGenTime: 0
+    lastGenTime: 0,
+    lastLinealTime: 0
 };
 
 // --- UTILIDADES MUSICALES ---
@@ -154,7 +158,6 @@ async function initAudio() {
 
     // 1. Cadena de Efectos Global
     state.reverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }).toDestination();
-    // ✅ Feedback reducido a 0.2 para evitar acumulación infinita en loops
     state.delay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.2, wet: 0.2 }).connect(state.reverb);
     
     state.filter = new Tone.Filter({
@@ -163,20 +166,26 @@ async function initAudio() {
         Q: 0.7
     }).connect(state.delay);
 
-    // 2. Sintetizador para Modo Random (Staccato/Rítmico)
+    // 2. ✅ Sintetizador para Modo Random CON LÍMITE DE POLIFONÍA
     state.randomSynth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: "triangle" },
-        envelope: { attack: 0.05, decay: 0.2, sustain: 0.3, release: 1.0 },
-        volume: -10
+        envelope: { 
+            attack: 0.05, 
+            decay: 0.2, 
+            sustain: 0.3, 
+            release: 0.4 // ✅ Reducido de 1.0 a 0.4 para evitar acumulación
+        },
+        volume: -10,
+        // ✅ LÍMITES CRÍTICOS PARA EVITAR SATURACIÓN
+        maxPolyphony: 4, // Máximo 4 notas simultáneas
+        voiceStealing: "oldest" // Cortar las notas más antiguas primero
     }).connect(state.filter);
 
-    // 3. ✅ 8 Voces Fijas para Modo Lineal (Ultra estable, sin acumulación de notas)
+    // 3. 8 Voces Fijas para Modo Lineal
     state.linealVoices = [];
     state.linealGains = [];
     for (let i = 0; i < CONFIG.bands; i++) {
-        // Nodo de ganancia independiente para cada voz
         const gain = new Tone.Gain(0).connect(state.filter);
-        // Oscilador de onda sinusoidal pura (muy bajo consumo de CPU)
         const osc = new Tone.OmniOscillator({
             type: "sine",
             volume: -5 
@@ -223,7 +232,8 @@ function processColumnForMusic(xIndex, currentTime) {
 
     if (state.isGenerative) {
         // --- MODO RANDOM (Staccato/Rítmico) ---
-        if (currentTime - state.lastGenTime > 0.15) { // Throttle de 150ms
+        // ✅ Throttle aumentado a 200ms para dar más espacio entre notas
+        if (currentTime - state.lastGenTime > 0.2) {
             const notesToTrigger = [];
             
             for (let b = 0; b < CONFIG.bands; b++) {
@@ -243,8 +253,8 @@ function processColumnForMusic(xIndex, currentTime) {
             }
 
             if (notesToTrigger.length > 0) {
-                // ✅ Limitar a 3 voces simultáneas para evitar saturación en modo random
-                notesToTrigger.slice(0, 3).forEach(v => {
+                // ✅ Limitar a 2 voces simultáneas máximo (más conservador)
+                notesToTrigger.slice(0, 2).forEach(v => {
                     state.randomSynth.triggerAttackRelease(v.note, v.duration, v.time, v.velocity);
                 });
             }
@@ -252,19 +262,12 @@ function processColumnForMusic(xIndex, currentTime) {
         }
     } else {
         // --- MODO LINEAL (8 Voces Fijas con Modulación de Ganancia) ---
-        // Esto elimina por completo la acumulación de notas y los "clicks"
         for (let b = 0; b < CONFIG.bands; b++) {
             let brightness = state.columnData[colOffset + b];
             if (state.isInverted) brightness = 1 - brightness;
             
-            // 1. Actualizar frecuencia suavemente (si cambió la escala/raíz)
             state.linealVoices[b].frequency.rampTo(chordFreqs[b], 0.1);
-            
-            // 2. Calcular ganancia objetivo (0 a 1) basado en el brillo
-            // Si el brillo es muy bajo, la ganancia va a 0 (silencio suave)
             const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 1.2 : 0;
-            
-            // 3. Rampar la ganancia suavemente para evitar clicks o pops
             state.linealGains[b].gain.rampTo(targetGain, 0.15);
         }
     }
@@ -288,8 +291,8 @@ async function play() {
     state.startTime = Tone.now();
     state.scanX = 0;
     state.lastGenTime = 0;
+    state.lastLinealTime = 0;
     
-    // Limpiar cualquier residuo anterior
     if(state.randomSynth) state.randomSynth.releaseAll();
     if(state.linealGains) {
         state.linealGains.forEach(g => g.gain.rampTo(0, 0.1));
@@ -315,10 +318,8 @@ function stop() {
     playhead.style.display = 'none';
     statusText.textContent = "Detenido.";
     
-    // Silenciar todo suavemente
     if (state.randomSynth) state.randomSynth.releaseAll();
     if (state.linealGains) {
-        const now = Tone.now();
         state.linealGains.forEach(g => g.gain.rampTo(0, 0.5));
     }
 }
@@ -354,14 +355,9 @@ function audioLoop() {
 
         state.scanX = Math.floor(progress * (state.width - 1));
         
-        // Throttle unificado para no saturar la CPU
         if (state.isGenerative) {
-            if (now - state.lastGenTime > 0.15) { 
-                processColumnForMusic(state.scanX, now);
-                state.lastGenTime = now;
-            }
+            processColumnForMusic(state.scanX, now);
         } else {
-            // En modo lineal, actualizamos cada 100ms para transiciones de pad suaves
             if (now - state.lastLinealTime > 0.1) {
                 processColumnForMusic(state.scanX, now);
                 state.lastLinealTime = now;
@@ -442,7 +438,7 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
         
         state.imageData = imageData;
         state.scanX = 0;
-        state.lastLinealTime = 0; // Resetear timer
+        state.lastLinealTime = 0;
         
         document.getElementById('btnPlay').disabled = false;
         document.getElementById('btnExport').disabled = false;
@@ -473,13 +469,15 @@ async function exportWAV() {
         const offReverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }, offlineCtx).connect(offDelay);
         offReverb.toDestination();
 
+        // ✅ Mismos límites de polifonía en exportación
         const offRandomSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "triangle" },
-            envelope: { attack: 0.05, decay: 0.2, sustain: 0.3, release: 1.0 },
-            volume: -10
+            envelope: { attack: 0.05, decay: 0.2, sustain: 0.3, release: 0.4 },
+            volume: -10,
+            maxPolyphony: 4,
+            voiceStealing: "oldest"
         }, offlineCtx).connect(offFilter);
 
-        // Voces fijas para exportación
         const offLinealVoices = [];
         const offLinealGains = [];
         for (let i = 0; i < CONFIG.bands; i++) {
@@ -507,7 +505,7 @@ async function exportWAV() {
             const colOffset = xIndex * CONFIG.bands;
             
             if (state.isGenerative) {
-                if (t - lastGenTime > 0.15) {
+                if (t - lastGenTime > 0.2) {
                     const notesToTrigger = [];
                     for (let b = 0; b < CONFIG.bands; b++) {
                         let brightness = state.columnData[colOffset + b];
@@ -519,7 +517,7 @@ async function exportWAV() {
                         }
                     }
                     if(notesToTrigger.length > 0) {
-                        notesToTrigger.slice(0, 3).forEach(v => {
+                        notesToTrigger.slice(0, 2).forEach(v => {
                             offRandomSynth.triggerAttackRelease(v.note, v.duration, t, v.velocity);
                         });
                     }
@@ -628,7 +626,6 @@ if(genToggle) {
         
         if(state.isPlaying) {
              if (state.isGenerative) {
-                 // Silenciar voces lineales al entrar en random
                  state.linealGains.forEach(g => g.gain.rampTo(0, 0.2));
              } else {
                  state.randomSynth.releaseAll();
