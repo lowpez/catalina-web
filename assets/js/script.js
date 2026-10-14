@@ -1,13 +1,12 @@
 /**
- * CATALINA WEB - Core Engine v4.3.3 (Corrección de Clipping & Sensibilidad Logarítmica)
+ * CATALINA WEB - Core Engine v4.3.4 (Botón Reset + UX Optimizada)
  * 
- * BASE: v4.3.2
- * FIXES:
- * 1. Eliminado el "Pumping" y saturación causados por compresión excesiva.
- * 2. Ajuste de Compresor: Threshold subido a -12dB, Ratio reducida a 2:1 (más natural).
- * 3. Nueva Curva de Volumen: Implementación de escala logarítmica suavizada.
- *    Esto permite escuchar líneas finas (1-2px) claramente SIN amplificar el ruido de fondo 
- *    ni causar distorsión digital en picos altos.
+ * BASE: v4.3.3 (Corrección de Clipping & Sensibilidad Logarítmica)
+ * NUEVO:
+ * 1. Función centralizada resetToDefaults() para restaurar toda la UI y el estado.
+ * 2. El botón Reset detiene la reproducción, restaura sliders, toggles y selects.
+ * 3. Oculta automáticamente el panel de Entropía al desactivar el modo Random.
+ * 4. Sincroniza etiquetas visuales (ej. "1m 0s") tras el reinicio.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -35,7 +34,7 @@ const state = {
     
     currentMode: 'musical',
     
-    masterVolume: 0.7,
+    masterVolume: 0.8, // Alineado con el default del HTML (80%)
     filterAmount: 0.5,
     freqMin: 65.41,
     freqMax: 1046.50,
@@ -166,7 +165,7 @@ function drawBandsOverlay() {
 }
 
 // ==============================================================================
-// MOTOR DE AUDIO CON TONE.JS (AJUSTADO PARA CLARIDAD)
+// MOTOR DE AUDIO CON TONE.JS
 // ==============================================================================
 
 async function initAudio() {
@@ -189,9 +188,6 @@ async function initAudio() {
         Q: 0.7
     });
 
-    // ✅ FIX v4.3.3: Compresor más suave para evitar pumping/distorsión
-    // Threshold subido (-12dB) para no amplificar tanto el silencio/ruido base.
-    // Ratio bajada (2:1) para una compresión musical, no agresiva.
     state.compressor = new Tone.Compressor({
         threshold: -12,    
         ratio: 2,          
@@ -248,7 +244,7 @@ function updateEntropyParameters() {
 }
 
 // ==============================================================================
-// LÓGICA DE REPRODUCCIÓN (SENSIBILIDAD LOGARÍTMICA SUAVIZADA)
+// LÓGICA DE REPRODUCCIÓN
 // ==============================================================================
 
 function processColumnForMusic(xIndex, currentTime) {
@@ -278,9 +274,7 @@ function processColumnForMusic(xIndex, currentTime) {
                 let brightness = state.columnData[colOffset + b];
                 if (state.isInverted) brightness = 1 - brightness;
                 
-                // Umbral conservador para modo generativo
                 if (brightness > 0.05 && Math.random() < triggerProbability) {
-                    // Velocity basada en raíz cuadrada para mejor rango dinámico
                     const velocity = Math.min(1, Math.sqrt(brightness)); 
                     const { freq } = selectNoteWithEntropy(chordFreqs, scaleName);
                     const noteStr = Tone.Frequency(freq, "hz").toNote();
@@ -308,17 +302,9 @@ function processColumnForMusic(xIndex, currentTime) {
             
             state.linealVoices[b].frequency.rampTo(chordFreqs[b], 0.1);
             
-            // ✅ FIX v4.3.3: Función de mapeo Logarítmico Suavizado
-            // Formula: Gain = K * ln(1 + Brightness * Factor)
-            // Esto da cuerpo a las líneas finas sin disparar el volumen en las gruesas.
-            const sensitivityFactor = 10; // Controla cuánto "peso" tienen los grises medios/bajos
-            const kMultiplier = 0.4;      // Escala general
-            
-            // Calculamos ganancia cruda
+            const sensitivityFactor = 10;
+            const kMultiplier = 0.4;
             let rawGain = kMultiplier * Math.log(1 + (brightness * sensitivityFactor));
-            
-            // Normalizamos ligeramente para asegurar que negro puro sea 0 y blanco puro tenga techo
-            // Clamp manual para evitar valores negativos por redondeo float
             const targetGain = Math.max(0, Math.min(1.0, rawGain)); 
             
             state.linealGains[b].gain.rampTo(targetGain, 0.15);
@@ -502,7 +488,7 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
 });
 
 // ==============================================================================
-// EXPORTACIÓN A WAV (CONSISTENTE CON LIVE PLAYBACK)
+// EXPORTACIÓN A WAV
 // ==============================================================================
 
 async function exportWAV() {
@@ -519,7 +505,6 @@ async function exportWAV() {
         
         const renderedBuffer = await Tone.Offline(async () => {
             
-            // Cadena idéntica al live playback
             const offReverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }).toDestination();
             const offDelay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.2, wet: 0.2 }).connect(offReverb);
             const offFilter = new Tone.Filter({ type: "lowpass", frequency: 4000, Q: 0.7 });
@@ -629,7 +614,6 @@ async function exportWAV() {
                             
                             offLinealVoices[b].frequency.rampTo(chordFreqs[b], 0.1, t);
                             
-                            // Misma fórmula logarítmica que en Live Playback
                             const sensitivityFactor = 10;
                             const kMultiplier = 0.4;
                             let rawGain = kMultiplier * Math.log(1 + (brightness * sensitivityFactor));
@@ -697,6 +681,75 @@ function bufferToWave(abuffer, len) {
 // LISTENERS Y UI
 // ==============================================================================
 
+// ✅ NUEVA FUNCIÓN OPTIMIZADA PARA EL RESET
+function resetToDefaults() {
+    // 1. Detener reproducción si está activa
+    if (state.isPlaying) stop();
+
+    // 2. Restaurar variables de estado
+    state.durationSec = 2.0;
+    state.masterVolume = 0.8;
+    state.filterAmount = 0.5;
+    state.entropy = 0.5;
+    state.exportDuration = 60;
+    state.freqMin = 65.41;
+    state.freqMax = 1046.50;
+    
+    state.isInverted = true;
+    state.isLooping = true;
+    state.isPingPong = true;
+    state.isGenerative = false;
+
+    // 3. Actualizar Sliders y Campos Numéricos
+    document.getElementById('paramSpeed').value = state.durationSec;
+    document.getElementById('valSpeed').textContent = state.durationSec.toFixed(1) + 's';
+
+    document.getElementById('paramVol').value = state.masterVolume * 100;
+    document.getElementById('valVol').textContent = (state.masterVolume * 100) + '%';
+
+    document.getElementById('paramFilter').value = state.filterAmount * 100;
+    document.getElementById('valFilter').textContent = (state.filterAmount * 100) + '%';
+
+    document.getElementById('paramEntropy').value = state.entropy * 100;
+    document.getElementById('valEntropy').textContent = Math.round(state.entropy * 100) + '%';
+
+    document.getElementById('paramExportDuration').value = state.exportDuration;
+    document.getElementById('valExportDuration').textContent = '1m 0s';
+
+    document.getElementById('paramFreqMin').value = 65;
+    document.getElementById('valFreqMin').textContent = '65 Hz';
+
+    document.getElementById('paramFreqMax').value = 523;
+    document.getElementById('valFreqMax').textContent = '523 Hz';
+
+    // 4. Restaurar Selects (Nota Raíz, Textura, Escala)
+    document.getElementById('selectRootNote').value = '130.81'; // C3
+    document.getElementById('selectVoicing').value = 'chord-melody';
+    document.getElementById('selectScale').value = 'lydian';
+
+    // 5. Restaurar Toggles
+    document.getElementById('toggleInvert').checked = true;
+    document.getElementById('toggleLoop').checked = true;
+    document.getElementById('togglePingPong').checked = true;
+    document.getElementById('toggleRND').checked = false;
+
+    // 6. Ocultar panel de Entropía (ya que Random está apagado)
+    const generativeControls = document.getElementById('generativeControls');
+    if (generativeControls) generativeControls.classList.remove('active');
+
+    // 7. Aplicar cambios de audio en tiempo real
+    updateMasterVolume();
+    updateFilterFrequency(state.filterAmount);
+    updateEntropyParameters();
+
+    // 8. Resetear UI de Scrubbing
+    scrubSlider.value = 0;
+    document.getElementById('valScrub').textContent = '0%';
+    if (playhead) playhead.style.display = 'none';
+
+    statusText.textContent = "Sistema reiniciado a valores por defecto.";
+}
+
 function setMode(mode) {
     state.currentMode = mode;
     const rootNoteContainer = document.getElementById('rootNoteContainer');
@@ -719,6 +772,12 @@ function setMode(mode) {
 document.getElementById('btnPlay').addEventListener('click', play);
 document.getElementById('btnStop').addEventListener('click', stop);
 document.getElementById('btnExport').addEventListener('click', exportWAV);
+
+// ✅ LISTENER DEL BOTÓN RESET
+const btnReset = document.getElementById('btnReset');
+if (btnReset) {
+    btnReset.addEventListener('click', resetToDefaults);
+}
 
 document.getElementById('toggleInvert').addEventListener('change', (e) => state.isInverted = e.target.checked);
 document.getElementById('toggleLoop').addEventListener('change', (e) => state.isLooping = e.target.checked);
