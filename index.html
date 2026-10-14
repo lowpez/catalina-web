@@ -82,11 +82,15 @@
                     <input type="file" id="imageInput" accept="image/*">
                 </div>
             </div>
-
-            <div class="control-group">
-                <button id="btnPlay" disabled>▶ Iniciar Audio</button>
-                <button id="btnStop" class="secondary" disabled>⏹ Detener</button>
-            </div>
+	
+			<div class="control-group">
+				<button id="btnPlay" class="btn-primary" disabled>▶ Iniciar Audio</button>
+				
+				<div class="button-row">
+					<button id="btnStop" class="secondary" disabled>⏹ Detener</button>
+					<button id="btnReset" class="secondary">↺ Reset</button>
+				</div>
+			</div>
 
             <div class="control-group">
                 <label>Velocidad de Escaneo <span class="value-display" id="valSpeed">2.0s</span></label>

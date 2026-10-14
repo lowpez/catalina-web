@@ -225,6 +225,19 @@ float: right;
 text-transform: none;
 }
 
+/* El contenedor de botones secundarios */
+.button-row {
+    display: flex;
+    gap: 10px; /* Espacio entre los botones */
+    margin-top: 10px;
+}
+
+/* Cada botón dentro de la fila ocupa el 50% menos el espacio del gap */
+.button-row button {
+    flex: 1; /* Esto hace que se repartan el espacio equitativamente */
+    width: 50%;
+}
+
 button {
     background: var(--input-bg);
 	font-family: var(--font-mono);
