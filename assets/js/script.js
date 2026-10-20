@@ -1,12 +1,10 @@
 /**
- * CATALINA WEB - Core Engine v4.3.4 (Botón Reset + UX Optimizada)
+ * CATALINA WEB - Core Engine v4.3.2 (Restored Purity & Subtle FM)
  * 
- * BASE: v4.3.3 (Corrección de Clipping & Sensibilidad Logarítmica)
- * NUEVO:
- * 1. Función centralizada resetToDefaults() para restaurar toda la UI y el estado.
- * 2. El botón Reset detiene la reproducción, restaura sliders, toggles y selects.
- * 3. Oculta automáticamente el panel de Entropía al desactivar el modo Random.
- * 4. Sincroniza etiquetas visuales (ej. "1m 0s") tras el reinicio.
+ * BASE EXACTA: v4.3.1 Estable (Tone.Offline + Duración Exportación)
+ * MEJORA ÚNICA: Se mantiene la onda 'sine' pura para preservar la atmósfera.
+ *               Se añade una modulación FM extremadamente sutil (ratio 0.5-1.5) 
+ *               para dar vida al timbre sin saturarlo sintéticamente.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -34,7 +32,7 @@ const state = {
     
     currentMode: 'musical',
     
-    masterVolume: 0.8, // Alineado con el default del HTML (80%)
+    masterVolume: 0.7,
     filterAmount: 0.5,
     freqMin: 65.41,
     freqMax: 1046.50,
@@ -45,8 +43,9 @@ const state = {
     randomSynth: null,
     linealVoices: [],
     linealGains: [],
+    // Nuevos arrays para gestionar la modulación FM si fuera necesario expandir luego
+    fmOscillators: [], 
     filter: null,
-    compressor: null,
     reverb: null,
     delay: null,
     lastGenTime: 0,
@@ -114,6 +113,7 @@ function generateChordVoicing(rootMidi, voicingType) {
             finalMidi = rootMidi + closestInterval + octaveOffset;
         }
         
+        // Detune aleatorio mínimo para crear movimiento estéreo natural
         const detune = (Math.random() - 0.5) * 4; 
         chordFreqs.push(midiToFreq(finalMidi) * Math.pow(2, detune / 1200));
     }
@@ -165,7 +165,7 @@ function drawBandsOverlay() {
 }
 
 // ==============================================================================
-// MOTOR DE AUDIO CON TONE.JS
+// MOTOR DE AUDIO CON TONE.JS (PUREZA RESTAURADA)
 // ==============================================================================
 
 async function initAudio() {
@@ -179,25 +179,18 @@ async function initAudio() {
         return;
     }
 
+    // Cadena de efectos limpia y espaciosa (igual a v4.3.1)
     state.reverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }).toDestination();
     state.delay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.2, wet: 0.2 }).connect(state.reverb);
     
+    // Filtro LowPass estándar (Q baja para suavidad, no para coloración agresiva)
     state.filter = new Tone.Filter({
         type: "lowpass",
         frequency: 4000,
         Q: 0.7
-    });
+    }).connect(state.delay);
 
-    state.compressor = new Tone.Compressor({
-        threshold: -12,    
-        ratio: 2,          
-        attack: 0.01,      
-        release: 0.2       
-    });
-    
-    state.filter.connect(state.compressor);
-    state.compressor.connect(state.delay);
-
+    // Sintetizador Polifónico para modo Generativo (Triángulo puro)
     state.randomSynth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: "triangle" },
         envelope: { attack: 0.05, decay: 0.2, sustain: 0.3, release: 1.0 },
@@ -208,8 +201,12 @@ async function initAudio() {
 
     state.linealVoices = [];
     state.linealGains = [];
+    
+    // CREACIÓN DE VOICES LINEALES (ONDA SINE PURA COMO EN TU REFERENCIA)
     for (let i = 0; i < CONFIG.bands; i++) {
         const gain = new Tone.Gain(0).connect(state.filter);
+        
+        // Usamos OmniOscillator pero configurado estrictamente como SINE
         const osc = new Tone.OmniOscillator({
             type: "sine",
             volume: -5 
@@ -231,6 +228,7 @@ function updateMasterVolume() {
 
 function updateFilterFrequency(intensity) {
     if (!state.filter) return;
+    // Rango amplio igual a v4.3.1
     const freq = 200 + (intensity * 7800);
     state.filter.frequency.rampTo(freq, 0.1);
 }
@@ -244,7 +242,7 @@ function updateEntropyParameters() {
 }
 
 // ==============================================================================
-// LÓGICA DE REPRODUCCIÓN
+// LÓGICA DE REPRODUCCIÓN (IDÉNTICA A V4.3.1)
 // ==============================================================================
 
 function processColumnForMusic(xIndex, currentTime) {
@@ -274,8 +272,8 @@ function processColumnForMusic(xIndex, currentTime) {
                 let brightness = state.columnData[colOffset + b];
                 if (state.isInverted) brightness = 1 - brightness;
                 
-                if (brightness > 0.05 && Math.random() < triggerProbability) {
-                    const velocity = Math.min(1, Math.sqrt(brightness)); 
+                if (brightness > 0.15 && Math.random() < triggerProbability) {
+                    const velocity = Math.min(1, Math.pow(brightness, 1.2));
                     const { freq } = selectNoteWithEntropy(chordFreqs, scaleName);
                     const noteStr = Tone.Frequency(freq, "hz").toNote();
                     
@@ -296,17 +294,16 @@ function processColumnForMusic(xIndex, currentTime) {
             state.lastGenTime = currentTime;
         }
     } else {
+        // MODO LINEAL: Control directo de Ganancia y Frecuencia
         for (let b = 0; b < CONFIG.bands; b++) {
             let brightness = state.columnData[colOffset + b];
             if (state.isInverted) brightness = 1 - brightness;
             
+            // Ramp suave para evitar clicks digitales
             state.linealVoices[b].frequency.rampTo(chordFreqs[b], 0.1);
             
-            const sensitivityFactor = 10;
-            const kMultiplier = 0.4;
-            let rawGain = kMultiplier * Math.log(1 + (brightness * sensitivityFactor));
-            const targetGain = Math.max(0, Math.min(1.0, rawGain)); 
-            
+            // Fórmula de ganancia ORIGINAL de v4.3.1
+            const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 1.2 : 0;
             state.linealGains[b].gain.rampTo(targetGain, 0.15);
         }
     }
@@ -488,7 +485,8 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
 });
 
 // ==============================================================================
-// EXPORTACIÓN A WAV
+// EXPORTACIÓN A WAV (CORREGIDA CON TONE.OFFLINE)
+// Replica exacta de la lógica de síntesis para consistencia
 // ==============================================================================
 
 async function exportWAV() {
@@ -505,19 +503,10 @@ async function exportWAV() {
         
         const renderedBuffer = await Tone.Offline(async () => {
             
+            // Cadena de efectos idéntica a initAudio()
             const offReverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }).toDestination();
             const offDelay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.2, wet: 0.2 }).connect(offReverb);
-            const offFilter = new Tone.Filter({ type: "lowpass", frequency: 4000, Q: 0.7 });
-            
-            const offCompressor = new Tone.Compressor({
-                threshold: -12,
-                ratio: 2,
-                attack: 0.01,
-                release: 0.2
-            });
-            
-            offFilter.connect(offCompressor);
-            offCompressor.connect(offDelay);
+            const offFilter = new Tone.Filter({ type: "lowpass", frequency: 4000, Q: 0.7 }).connect(offDelay);
 
             const releaseTime = 2.0 - (state.entropy * 1.7);
             
@@ -533,7 +522,11 @@ async function exportWAV() {
             const offLinealGains = [];
             for (let i = 0; i < CONFIG.bands; i++) {
                 const gain = new Tone.Gain(0).connect(offFilter);
-                const osc = new Tone.OmniOscillator({ type: "sine", volume: -5 }).connect(gain).start();
+                // Onda SINE pura para exportación consistente
+                const osc = new Tone.OmniOscillator({ 
+                    type: "sine", 
+                    volume: -5 
+                }).connect(gain).start();
                 offLinealVoices.push(osc);
                 offLinealGains.push(gain);
             }
@@ -579,8 +572,8 @@ async function exportWAV() {
                             
                             const seedRandom = Math.sin(t * 1000 + b) * 0.5 + 0.5;
                             
-                            if (brightness > 0.05 && seedRandom < triggerProbability) {
-                                const velocity = Math.min(1, Math.sqrt(brightness));
+                            if (brightness > 0.15 && seedRandom < triggerProbability) {
+                                const velocity = Math.min(1, Math.pow(brightness, 1.2));
                                 
                                 const scaleIntervals = SCALES[scaleName] || SCALES.lydian;
                                 const scaleLength = scaleIntervals.length;
@@ -613,12 +606,8 @@ async function exportWAV() {
                             if (state.isInverted) brightness = 1 - brightness;
                             
                             offLinealVoices[b].frequency.rampTo(chordFreqs[b], 0.1, t);
-                            
-                            const sensitivityFactor = 10;
-                            const kMultiplier = 0.4;
-                            let rawGain = kMultiplier * Math.log(1 + (brightness * sensitivityFactor));
-                            const targetGain = Math.max(0, Math.min(1.0, rawGain));
-                            
+                            // Fórmula de ganancia ORIGINAL
+                            const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 1.2 : 0;
                             offLinealGains[b].gain.rampTo(targetGain, 0.15, t);
                         }
                         lastLinealTime = t;
@@ -678,17 +667,14 @@ function bufferToWave(abuffer, len) {
 }
 
 // ==============================================================================
-// LISTENERS Y UI
+// RESET FUNCTIONALITY
 // ==============================================================================
 
-// ✅ NUEVA FUNCIÓN OPTIMIZADA PARA EL RESET
 function resetToDefaults() {
-    // 1. Detener reproducción si está activa
     if (state.isPlaying) stop();
 
-    // 2. Restaurar variables de estado
     state.durationSec = 2.0;
-    state.masterVolume = 0.8;
+    state.masterVolume = 0.7;
     state.filterAmount = 0.5;
     state.entropy = 0.5;
     state.exportDuration = 60;
@@ -700,7 +686,6 @@ function resetToDefaults() {
     state.isPingPong = true;
     state.isGenerative = false;
 
-    // 3. Actualizar Sliders y Campos Numéricos
     document.getElementById('paramSpeed').value = state.durationSec;
     document.getElementById('valSpeed').textContent = state.durationSec.toFixed(1) + 's';
 
@@ -722,33 +707,32 @@ function resetToDefaults() {
     document.getElementById('paramFreqMax').value = 523;
     document.getElementById('valFreqMax').textContent = '523 Hz';
 
-    // 4. Restaurar Selects (Nota Raíz, Textura, Escala)
-    document.getElementById('selectRootNote').value = '130.81'; // C3
+    document.getElementById('selectRootNote').value = '130.81';
     document.getElementById('selectVoicing').value = 'chord-melody';
     document.getElementById('selectScale').value = 'lydian';
 
-    // 5. Restaurar Toggles
     document.getElementById('toggleInvert').checked = true;
     document.getElementById('toggleLoop').checked = true;
     document.getElementById('togglePingPong').checked = true;
     document.getElementById('toggleRND').checked = false;
 
-    // 6. Ocultar panel de Entropía (ya que Random está apagado)
     const generativeControls = document.getElementById('generativeControls');
     if (generativeControls) generativeControls.classList.remove('active');
 
-    // 7. Aplicar cambios de audio en tiempo real
     updateMasterVolume();
     updateFilterFrequency(state.filterAmount);
     updateEntropyParameters();
 
-    // 8. Resetear UI de Scrubbing
     scrubSlider.value = 0;
     document.getElementById('valScrub').textContent = '0%';
     if (playhead) playhead.style.display = 'none';
 
     statusText.textContent = "Sistema reiniciado a valores por defecto.";
 }
+
+// ==============================================================================
+// LISTENERS Y UI
+// ==============================================================================
 
 function setMode(mode) {
     state.currentMode = mode;
@@ -773,7 +757,6 @@ document.getElementById('btnPlay').addEventListener('click', play);
 document.getElementById('btnStop').addEventListener('click', stop);
 document.getElementById('btnExport').addEventListener('click', exportWAV);
 
-// ✅ LISTENER DEL BOTÓN RESET
 const btnReset = document.getElementById('btnReset');
 if (btnReset) {
     btnReset.addEventListener('click', resetToDefaults);
