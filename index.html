@@ -182,8 +182,21 @@
 
             <!-- SECCIÓN 4: PROCESAMIENTO Y SALIDA -->
             <div class="control-group">
-                <label>Filtro (Brillo → Cutoff) <span class="value-display" id="valFilter">50%</span></label>
-                <input type="range" id="paramFilter" min="0" max="100" step="1" value="50">
+                <label>Color Tímbrico <span class="value-display" id="valFilter">50%</span></label>
+                
+                <div class="filter-control-row">
+                    <!-- Icono Izquierdo: Profundo / Oscuro / Submarino -->
+                    <svg class="filter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+                    </svg>
+                    
+                    <input type="range" id="paramFilter" min="0" max="100" step="1" value="50">
+                    
+                    <!-- Icono Derecho: Brillante / Cristalino / Etéreo -->
+                    <svg class="filter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                    </svg>
+                </div>
             </div>
 
             <div class="control-group">

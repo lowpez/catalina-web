@@ -217,6 +217,36 @@ input[type="range"] {
     cursor: pointer;
 }
 
+/* =========================================
+   CONTROL DE FILTRO TÍMBRICO (Minimalista)
+   ========================================= */
+
+.filter-control-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+}
+
+.filter-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--text-dim);
+    flex-shrink: 0; /* Evita que el icono se aplaste */
+    transition: color 0.3s ease;
+}
+
+/* Efecto sutil: al pasar el mouse por el control, los iconos se iluminan */
+.filter-control-row:hover .filter-icon {
+    color: var(--accent);
+}
+
+/* Asegura que el slider ocupe todo el espacio restante entre los iconos */
+.filter-control-row input[type="range"] {
+    flex: 1;
+    margin: 0;
+}
+
 .value-display { 
 font-size: 0.85rem; 
 color: var(--accent); 

@@ -225,7 +225,20 @@ function updateMasterVolume() {
 
 function updateFilterFrequency(intensity) {
     if (!state.filter) return;
-    const freq = 200 + (intensity * 7800);
+    
+    // intensity va de 0.0 a 1.0 (0% a 100%)
+    
+    // Mapeo Exponencial para "Color Tímbrico":
+    // 0%   = 150 Hz  (Oscuro, profundo, "bajo el agua")
+    // 50%  = ~1650 Hz (Cálido, natural, abierto)
+    // 100% = 18000 Hz (Cristalino, brillante, con "aire")
+    
+    const minFreq = 150;
+    const maxFreq = 18000;
+    
+    // Fórmula exponencial para que el cambio se sienta musical y progresivo
+    const freq = minFreq * Math.pow(maxFreq / minFreq, intensity);
+    
     state.filter.frequency.rampTo(freq, 0.1);
 }
 
