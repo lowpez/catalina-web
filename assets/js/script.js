@@ -1,11 +1,12 @@
 /**
- * CATALINA WEB - Core Engine v4.3.6 (Generative Organic Integration)
+ * CATALINA WEB - Core Engine v4.3.7 (Generative Organic Entropy Fix)
  * 
- * BASE EXACTA: v4.3.5 Estable (Safe Dynamics + Pureza Restaurada)
- * MEJORA CRÍTICA: Unificación tímbrica del modo Generativo (Random).
- * 1. Cambio de oscilador de 'triangle' a 'sine' para pureza absoluta.
- * 2. Aumento del 'attack' a 0.1s para eliminar transitorios digitales duros (clicks).
- * Resultado: Notas generativas que suenan como pulsos orgánicos, gotas o campanas suaves.
+ * BASE EXACTA: v4.3.6 (Color Tímbrico Exponencial + Nota Raíz Completa)
+ * MEJORA CRÍTICA: Corrección de la lógica de entropía en modo Generativo.
+ * 1. selectNoteWithEntropy: Salto mínimo de 1 nota para evitar estancamiento melódico.
+ * 2. processColumnForMusic: Probabilidad y throttle ajustados para que 0% sea espaciado/calmado.
+ * 3. exportWAV: Sincronización exacta de la lógica generativa con la reproducción en vivo.
+ * Resultado: El slider de Entropía ahora controla la "Intensidad Emocional" de forma natural.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -130,9 +131,16 @@ function selectNoteWithEntropy(chordFreqs, scaleName) {
         currentIndex = Math.floor(scaleLength / 2);
     }
     
+    // CAMBIO CLAVE: Asegurar un salto mínimo de 1, incluso en entropía 0
+    // Esto evita que se quede "pegado" en la misma nota (sonido sintético)
+    // y fuerza un movimiento de "paso a paso" (caminata aleatoria suave).
+    const minJump = 1; 
     const maxJump = Math.floor(state.entropy * (scaleLength - 1));
-    const minJump = -maxJump;
-    const jump = Math.floor(Math.random() * (maxJump - minJump + 1)) + minJump;
+    
+    // Si la entropía es 0, maxJump será 0, pero usamos minJump para forzar movimiento
+    const effectiveMax = Math.max(minJump, maxJump);
+    
+    const jump = Math.floor(Math.random() * (effectiveMax * 2 + 1)) - effectiveMax;
     let newIndex = currentIndex + jump;
     
     newIndex = Math.max(0, Math.min(newIndex, scaleLength - 1));
@@ -190,10 +198,10 @@ async function initAudio() {
         Q: 0.7
     }).connect(state.delay);
 
-    //  CAMBIO CLAVE: Onda SINE y Ataque suave (0.1s) para un sonido orgánico
+    // CAMBIO CLAVE: Onda SINE y Ataque suave (0.1s) para un sonido orgánico
     state.randomSynth = new Tone.PolySynth(Tone.Synth, {
-        oscillator: { type: "sine" }, // Antes: triangle
-        envelope: { attack: 0.1, decay: 0.2, sustain: 0.3, release: 1.0 }, // Antes: attack 0.05
+        oscillator: { type: "sine" }, 
+        envelope: { attack: 0.1, decay: 0.2, sustain: 0.3, release: 1.0 }, 
         volume: -10,
         maxPolyphony: 4,
         voiceStealing: "oldest"
@@ -225,8 +233,6 @@ function updateMasterVolume() {
 
 function updateFilterFrequency(intensity) {
     if (!state.filter) return;
-    
-    // intensity va de 0.0 a 1.0 (0% a 100%)
     
     // Mapeo Exponencial para "Color Tímbrico":
     // 0%   = 150 Hz  (Oscuro, profundo, "bajo el agua")
@@ -271,8 +277,15 @@ function processColumnForMusic(xIndex, currentTime) {
     const chordFreqs = generateChordVoicing(rootMidi, voicingType);
 
     if (state.isGenerative) {
-        const triggerProbability = 1.0 - (state.entropy * 0.8);
-        const throttleTime = 0.2 + (state.entropy * 0.1);
+        // 1. PROBABILIDAD: De "Siempre dispara" a "Dispara a veces"
+        // 0% (Suave) = 15% probabilidad (Notas espaciadas, deja respirar al sonido)
+        // 100% (Caótico) = 75% probabilidad (Ráfagas densas)
+        const triggerProbability = 0.15 + (state.entropy * 0.6);
+        
+        // 2. THROTTLE: De "Lento" a "Rápido"
+        // 0% (Suave) = 0.4s entre notas (Calmado)
+        // 100% (Caótico) = 0.1s entre notas (Frenético)
+        const throttleTime = 0.4 - (state.entropy * 0.3);
         
         if (currentTime - state.lastGenTime > throttleTime) {
             const notesToTrigger = [];
@@ -322,7 +335,7 @@ function processColumnForMusic(xIndex, currentTime) {
 
 async function play() {
     if (!state.imageData) {
-        statusText.textContent = "️ Por favor, carga una imagen primero.";
+        statusText.textContent = "⚠️ Por favor, carga una imagen primero.";
         return;
     }
     
@@ -516,10 +529,10 @@ async function exportWAV() {
 
             const releaseTime = 2.0 - (state.entropy * 1.7);
             
-            // ⚡ CAMBIO CLAVE: Onda SINE y Ataque suave (0.1s) para consistencia
+            // CAMBIO CLAVE: Onda SINE y Ataque suave (0.1s) para consistencia
             const offRandomSynth = new Tone.PolySynth(Tone.Synth, {
-                oscillator: { type: "sine" }, // Antes: triangle
-                envelope: { attack: 0.1, decay: 0.2, sustain: 0.3, release: releaseTime }, // Antes: attack 0.05
+                oscillator: { type: "sine" }, 
+                envelope: { attack: 0.1, decay: 0.2, sustain: 0.3, release: releaseTime }, 
                 volume: -10,
                 maxPolyphony: 4,
                 voiceStealing: "oldest"
@@ -566,8 +579,11 @@ async function exportWAV() {
                 const colOffset = xIndex * CONFIG.bands;
                 
                 if (state.isGenerative) {
-                    const triggerProbability = 1.0 - (state.entropy * 0.8);
-                    const throttleTime = 0.2 + (state.entropy * 0.1);
+                    // 1. PROBABILIDAD: Sincronizada con processColumnForMusic
+                    const triggerProbability = 0.15 + (state.entropy * 0.6);
+                    
+                    // 2. THROTTLE: Sincronizado con processColumnForMusic
+                    const throttleTime = 0.4 - (state.entropy * 0.3);
                     
                     if (t - lastGenTime > throttleTime) {
                         const notesToTrigger = [];
@@ -586,9 +602,13 @@ async function exportWAV() {
                                 
                                 if (lastNoteIndex < 0) lastNoteIndex = Math.floor(scaleLength / 2);
                                 
+                                // CAMBIO CLAVE: Salto mínimo de 1 en exportación también
                                 const maxJump = Math.floor(state.entropy * (scaleLength - 1));
+                                const minJump = 1;
+                                const effectiveMax = Math.max(minJump, maxJump);
+                                
                                 const jumpSeed = Math.sin(t * 500 + b * 100) * 0.5 + 0.5;
-                                const jump = Math.floor(jumpSeed * (maxJump * 2 + 1)) - maxJump;
+                                const jump = Math.floor(jumpSeed * (effectiveMax * 2 + 1)) - effectiveMax;
                                 lastNoteIndex = Math.max(0, Math.min(lastNoteIndex + jump, scaleLength - 1));
                                 
                                 const freq = chordFreqs[lastNoteIndex % chordFreqs.length];
