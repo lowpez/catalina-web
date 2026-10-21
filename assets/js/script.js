@@ -1,10 +1,11 @@
 /**
- * CATALINA WEB - Core Engine v4.3.5 (Safe Dynamics + Pureza Restaurada)
+ * CATALINA WEB - Core Engine v4.3.6 (Generative Organic Integration)
  * 
- * BASE EXACTA: v4.3.2 Estable
- * MEJORA CRÍTICA: Se añade Tone.Limiter(-1) al final de la cadena de efectos.
- *                 Esto previene el clipping digital en imágenes con trazos muy gruesos
- *                 sin afectar la calidad del timbre en trazos finos.
+ * BASE EXACTA: v4.3.5 Estable (Safe Dynamics + Pureza Restaurada)
+ * MEJORA CRÍTICA: Unificación tímbrica del modo Generativo (Random).
+ * 1. Cambio de oscilador de 'triangle' a 'sine' para pureza absoluta.
+ * 2. Aumento del 'attack' a 0.1s para eliminar transitorios digitales duros (clicks).
+ * Resultado: Notas generativas que suenan como pulsos orgánicos, gotas o campanas suaves.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -45,9 +46,7 @@ const state = {
     linealGains: [],
     fmOscillators: [], 
     
-    // NUEVO: Referencia al limitador maestro
     limiter: null,
-    
     filter: null,
     reverb: null,
     delay: null,
@@ -116,7 +115,6 @@ function generateChordVoicing(rootMidi, voicingType) {
             finalMidi = rootMidi + closestInterval + octaveOffset;
         }
         
-        // Detune aleatorio mínimo para crear movimiento estéreo natural
         const detune = (Math.random() - 0.5) * 4; 
         chordFreqs.push(midiToFreq(finalMidi) * Math.pow(2, detune / 1200));
     }
@@ -168,7 +166,7 @@ function drawBandsOverlay() {
 }
 
 // ==============================================================================
-// MOTOR DE AUDIO CON TONE.JS (PUREZA RESTAURADA + LIMITER)
+// MOTOR DE AUDIO CON TONE.JS (GENERATIVO ORGÁNICO)
 // ==============================================================================
 
 async function initAudio() {
@@ -182,29 +180,20 @@ async function initAudio() {
         return;
     }
 
-    // CADENA DE EFECTOS ACTUALIZADA CON LIMITER
-    
-    // 1. Limitador Maestro (Previene Clipping en trazos gruesos)
-    // Usamos -1 dB para dejar un pequeño margen de seguridad
     state.limiter = new Tone.Limiter(-1).toDestination();
-
-    // 2. Reverb (Conecta al Limitador en lugar de directo a Destination)
     state.reverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }).connect(state.limiter);
-    
-    // 3. Delay
     state.delay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.2, wet: 0.2 }).connect(state.reverb);
     
-    // 4. Filtro LowPass estándar (Q baja para suavidad)
     state.filter = new Tone.Filter({
         type: "lowpass",
         frequency: 4000,
         Q: 0.7
     }).connect(state.delay);
 
-    // Sintetizador Polifónico para modo Generativo (Triángulo puro)
+    //  CAMBIO CLAVE: Onda SINE y Ataque suave (0.1s) para un sonido orgánico
     state.randomSynth = new Tone.PolySynth(Tone.Synth, {
-        oscillator: { type: "triangle" },
-        envelope: { attack: 0.05, decay: 0.2, sustain: 0.3, release: 1.0 },
+        oscillator: { type: "sine" }, // Antes: triangle
+        envelope: { attack: 0.1, decay: 0.2, sustain: 0.3, release: 1.0 }, // Antes: attack 0.05
         volume: -10,
         maxPolyphony: 4,
         voiceStealing: "oldest"
@@ -213,10 +202,8 @@ async function initAudio() {
     state.linealVoices = [];
     state.linealGains = [];
     
-    // CREACIÓN DE VOICES LINEALES (ONDA SINE PURA)
     for (let i = 0; i < CONFIG.bands; i++) {
         const gain = new Tone.Gain(0).connect(state.filter);
-        
         const osc = new Tone.OmniOscillator({
             type: "sine",
             volume: -5 
@@ -238,7 +225,6 @@ function updateMasterVolume() {
 
 function updateFilterFrequency(intensity) {
     if (!state.filter) return;
-    // Rango amplio: 200Hz - 8000Hz (MANTIENE BRILLO)
     const freq = 200 + (intensity * 7800);
     state.filter.frequency.rampTo(freq, 0.1);
 }
@@ -252,7 +238,7 @@ function updateEntropyParameters() {
 }
 
 // ==============================================================================
-// LÓGICA DE REPRODUCCIÓN (IDÉNTICA A V4.3.2)
+// LÓGICA DE REPRODUCCIÓN
 // ==============================================================================
 
 function processColumnForMusic(xIndex, currentTime) {
@@ -304,15 +290,13 @@ function processColumnForMusic(xIndex, currentTime) {
             state.lastGenTime = currentTime;
         }
     } else {
-        // MODO LINEAL: Control directo de Ganancia y Frecuencia
         for (let b = 0; b < CONFIG.bands; b++) {
             let brightness = state.columnData[colOffset + b];
             if (state.isInverted) brightness = 1 - brightness;
             
-            // Ramp suave para evitar clicks digitales
             state.linealVoices[b].frequency.rampTo(chordFreqs[b], 0.1);
             
-            // Fórmula de ganancia ORIGINAL de v4.3.1/v4.3.2
+            // Ganancia ajustada a 0.75 para evitar saturación del Limiter
             const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 0.75 : 0;
             state.linealGains[b].gain.rampTo(targetGain, 0.15);
         }
@@ -325,7 +309,7 @@ function processColumnForMusic(xIndex, currentTime) {
 
 async function play() {
     if (!state.imageData) {
-        statusText.textContent = "⚠️ Por favor, carga una imagen primero.";
+        statusText.textContent = "️ Por favor, carga una imagen primero.";
         return;
     }
     
@@ -495,7 +479,7 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
 });
 
 // ==============================================================================
-// EXPORTACIÓN A WAV (CON LIMITER)
+// EXPORTACIÓN A WAV
 // ==============================================================================
 
 async function exportWAV() {
@@ -512,25 +496,17 @@ async function exportWAV() {
         
         const renderedBuffer = await Tone.Offline(async () => {
             
-            // Cadena de efectos idéntica a initAudio() INCLUYENDO LIMITER
-            
-            // 1. Limitador Maestro
             const offLimiter = new Tone.Limiter(-1).toDestination();
-
-            // 2. Reverb conecta al Limiter
             const offReverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }).connect(offLimiter);
-            
-            // 3. Delay
             const offDelay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.2, wet: 0.2 }).connect(offReverb);
-            
-            // 4. Filter
             const offFilter = new Tone.Filter({ type: "lowpass", frequency: 4000, Q: 0.7 }).connect(offDelay);
 
             const releaseTime = 2.0 - (state.entropy * 1.7);
             
+            // ⚡ CAMBIO CLAVE: Onda SINE y Ataque suave (0.1s) para consistencia
             const offRandomSynth = new Tone.PolySynth(Tone.Synth, {
-                oscillator: { type: "triangle" },
-                envelope: { attack: 0.05, decay: 0.2, sustain: 0.3, release: releaseTime },
+                oscillator: { type: "sine" }, // Antes: triangle
+                envelope: { attack: 0.1, decay: 0.2, sustain: 0.3, release: releaseTime }, // Antes: attack 0.05
                 volume: -10,
                 maxPolyphony: 4,
                 voiceStealing: "oldest"
