@@ -1,10 +1,10 @@
 /**
- * CATALINA WEB - Core Engine v4.3.2 (Restored Purity & Subtle FM)
+ * CATALINA WEB - Core Engine v4.3.5 (Safe Dynamics + Pureza Restaurada)
  * 
- * BASE EXACTA: v4.3.1 Estable (Tone.Offline + Duración Exportación)
- * MEJORA ÚNICA: Se mantiene la onda 'sine' pura para preservar la atmósfera.
- *               Se añade una modulación FM extremadamente sutil (ratio 0.5-1.5) 
- *               para dar vida al timbre sin saturarlo sintéticamente.
+ * BASE EXACTA: v4.3.2 Estable
+ * MEJORA CRÍTICA: Se añade Tone.Limiter(-1) al final de la cadena de efectos.
+ *                 Esto previene el clipping digital en imágenes con trazos muy gruesos
+ *                 sin afectar la calidad del timbre en trazos finos.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -43,8 +43,11 @@ const state = {
     randomSynth: null,
     linealVoices: [],
     linealGains: [],
-    // Nuevos arrays para gestionar la modulación FM si fuera necesario expandir luego
     fmOscillators: [], 
+    
+    // NUEVO: Referencia al limitador maestro
+    limiter: null,
+    
     filter: null,
     reverb: null,
     delay: null,
@@ -165,7 +168,7 @@ function drawBandsOverlay() {
 }
 
 // ==============================================================================
-// MOTOR DE AUDIO CON TONE.JS (PUREZA RESTAURADA)
+// MOTOR DE AUDIO CON TONE.JS (PUREZA RESTAURADA + LIMITER)
 // ==============================================================================
 
 async function initAudio() {
@@ -179,11 +182,19 @@ async function initAudio() {
         return;
     }
 
-    // Cadena de efectos limpia y espaciosa (igual a v4.3.1)
-    state.reverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }).toDestination();
+    // CADENA DE EFECTOS ACTUALIZADA CON LIMITER
+    
+    // 1. Limitador Maestro (Previene Clipping en trazos gruesos)
+    // Usamos -1 dB para dejar un pequeño margen de seguridad
+    state.limiter = new Tone.Limiter(-1).toDestination();
+
+    // 2. Reverb (Conecta al Limitador en lugar de directo a Destination)
+    state.reverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }).connect(state.limiter);
+    
+    // 3. Delay
     state.delay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.2, wet: 0.2 }).connect(state.reverb);
     
-    // Filtro LowPass estándar (Q baja para suavidad, no para coloración agresiva)
+    // 4. Filtro LowPass estándar (Q baja para suavidad)
     state.filter = new Tone.Filter({
         type: "lowpass",
         frequency: 4000,
@@ -202,11 +213,10 @@ async function initAudio() {
     state.linealVoices = [];
     state.linealGains = [];
     
-    // CREACIÓN DE VOICES LINEALES (ONDA SINE PURA COMO EN TU REFERENCIA)
+    // CREACIÓN DE VOICES LINEALES (ONDA SINE PURA)
     for (let i = 0; i < CONFIG.bands; i++) {
         const gain = new Tone.Gain(0).connect(state.filter);
         
-        // Usamos OmniOscillator pero configurado estrictamente como SINE
         const osc = new Tone.OmniOscillator({
             type: "sine",
             volume: -5 
@@ -228,7 +238,7 @@ function updateMasterVolume() {
 
 function updateFilterFrequency(intensity) {
     if (!state.filter) return;
-    // Rango amplio igual a v4.3.1
+    // Rango amplio: 200Hz - 8000Hz (MANTIENE BRILLO)
     const freq = 200 + (intensity * 7800);
     state.filter.frequency.rampTo(freq, 0.1);
 }
@@ -242,7 +252,7 @@ function updateEntropyParameters() {
 }
 
 // ==============================================================================
-// LÓGICA DE REPRODUCCIÓN (IDÉNTICA A V4.3.1)
+// LÓGICA DE REPRODUCCIÓN (IDÉNTICA A V4.3.2)
 // ==============================================================================
 
 function processColumnForMusic(xIndex, currentTime) {
@@ -302,8 +312,8 @@ function processColumnForMusic(xIndex, currentTime) {
             // Ramp suave para evitar clicks digitales
             state.linealVoices[b].frequency.rampTo(chordFreqs[b], 0.1);
             
-            // Fórmula de ganancia ORIGINAL de v4.3.1
-            const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 1.2 : 0;
+            // Fórmula de ganancia ORIGINAL de v4.3.1/v4.3.2
+            const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 0.75 : 0;
             state.linealGains[b].gain.rampTo(targetGain, 0.15);
         }
     }
@@ -485,8 +495,7 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
 });
 
 // ==============================================================================
-// EXPORTACIÓN A WAV (CORREGIDA CON TONE.OFFLINE)
-// Replica exacta de la lógica de síntesis para consistencia
+// EXPORTACIÓN A WAV (CON LIMITER)
 // ==============================================================================
 
 async function exportWAV() {
@@ -503,9 +512,18 @@ async function exportWAV() {
         
         const renderedBuffer = await Tone.Offline(async () => {
             
-            // Cadena de efectos idéntica a initAudio()
-            const offReverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }).toDestination();
+            // Cadena de efectos idéntica a initAudio() INCLUYENDO LIMITER
+            
+            // 1. Limitador Maestro
+            const offLimiter = new Tone.Limiter(-1).toDestination();
+
+            // 2. Reverb conecta al Limiter
+            const offReverb = new Tone.Reverb({ decay: 2.5, wet: 0.35 }).connect(offLimiter);
+            
+            // 3. Delay
             const offDelay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.2, wet: 0.2 }).connect(offReverb);
+            
+            // 4. Filter
             const offFilter = new Tone.Filter({ type: "lowpass", frequency: 4000, Q: 0.7 }).connect(offDelay);
 
             const releaseTime = 2.0 - (state.entropy * 1.7);
@@ -522,7 +540,6 @@ async function exportWAV() {
             const offLinealGains = [];
             for (let i = 0; i < CONFIG.bands; i++) {
                 const gain = new Tone.Gain(0).connect(offFilter);
-                // Onda SINE pura para exportación consistente
                 const osc = new Tone.OmniOscillator({ 
                     type: "sine", 
                     volume: -5 
@@ -606,8 +623,7 @@ async function exportWAV() {
                             if (state.isInverted) brightness = 1 - brightness;
                             
                             offLinealVoices[b].frequency.rampTo(chordFreqs[b], 0.1, t);
-                            // Fórmula de ganancia ORIGINAL
-                            const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 1.2 : 0;
+                            const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 0.75 : 0;
                             offLinealGains[b].gain.rampTo(targetGain, 0.15, t);
                         }
                         lastLinealTime = t;
