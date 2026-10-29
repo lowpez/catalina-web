@@ -3,6 +3,7 @@
     --panel: #FFFFFF;
     --accent: #00ff9d;
     --accent-dim: #00ff9d44;
+	--playhead: #870011;
     --text: #08100C;
     --text-dim: #6b6b6b;
 	--text-label: #08100C;
@@ -122,8 +123,8 @@ canvas {
     top: 1rem;
     bottom: 1rem;
     width: 3px;
-    background: var(--accent);
-    box-shadow: 0 0 15px var(--accent);
+    background: var(--playhead);
+    box-shadow: 0 0 15px var(--playhead);
     pointer-events: none;
     display: none;
     z-index: 20;

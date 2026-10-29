@@ -160,8 +160,8 @@ const scrubSlider = document.getElementById('paramScrub');
 function drawBandsOverlay() {
     if (!state.width || !state.height) return;
     const bandHeight = state.height / CONFIG.bands;
-    ctx.strokeStyle = 'rgba(0, 255, 157, 0.3)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(135, 0, 17, 0.3)'/*'rgba(0, 255, 157, 0.3)'*/;
+    ctx.lineWidth = 3;
     ctx.setLineDash([4, 4]);
     for (let i = 1; i < CONFIG.bands; i++) {
         const y = i * bandHeight;
