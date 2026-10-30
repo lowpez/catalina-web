@@ -1,13 +1,13 @@
 /**
- * CATALINA WEB - Core Engine v4.3.9 (Adaptive Band Balance)
+ * CATALINA WEB - Core Engine v4.4.0 (Expanded Harmonic Textures)
  * 
- * BASE EXACTA: v4.3.8 (Expanded Emotional Palettes)
- * MEJORA CRÍTICA: Implementación de Balance Adaptativo de Bandas.
- * 1. Análisis previo de la imagen para detectar bandas con líneas continuas vs. rítmicas.
- * 2. Atenuación automática y suave de bandas con >50% de activación para evitar saturación.
- * 3. Preservación del volumen completo en bandas con actividad rítmica o espaciada.
- * Resultado: Las partituras gráficas con líneas horizontales continuas ya no dominan el sonido,
- * permitiendo que los detalles rítmicos, las pausas y las texturas se escuchen con claridad.
+ * BASE EXACTA: v4.3.9 (Adaptive Band Balance)
+ * MEJORA CRÍTICA: Expansión del vocabulario armónico con 3 nuevas texturas de voicing.
+ * 1. eno-ambient [0, 5, 7, 11, 14, 17, 21, 24]: Maj13sus4 - Vasto, suspendido, sin tensión (Brian Eno).
+ * 2. ethereal [0, 4, 7, 11, 14, 18, 21, 24]: Maj13#11 - Brillante, onírico, con onceava aumentada (Cocteau Twins).
+ * 3. mystic [0, 5, 10, 15, 19, 24, 29, 34]: Apilamiento de cuartas - Ambiguo, moderno, flotante (Debussy/Jazz).
+ * Resultado: El usuario puede ahora transformar la misma imagen en 7 paisajes sonoros completamente distintos,
+ * desde lo clásico hasta lo cinematográfico, místico y etéreo, solo cambiando la textura armónica.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -107,6 +107,19 @@ function generateChordVoicing(rootMidi, voicingType) {
         case 'voice-pair': voicingIntervals = [0, 4, 7, 11, 12, 16, 19, 23]; break;
         case 'drone': voicingIntervals = [0, 0, 7, 12, 14, 16, 19, 21]; break;
         case 'open': voicingIntervals = [0, 7, 12, 19, 24, 31, 36, 43]; break;
+		        // NUEVAS TEXTURAS ARMÓNICAS
+        case 'eno-ambient': 
+            // Maj13sus4: Vasto, suspendido, sin tensión (Brian Eno)
+            voicingIntervals = [0, 5, 7, 11, 14, 17, 21, 24]; 
+            break;
+        case 'ethereal': 
+            // Maj13#11: Brillante, onírmico, con onceava aumentada (Cocteau Twins)
+            voicingIntervals = [0, 4, 7, 11, 14, 18, 21, 24]; 
+            break;
+        case 'mystic': 
+            // Apilamiento de cuartas: Ambiguo, moderno, flotante (Debussy / Jazz)
+            voicingIntervals = [0, 5, 10, 15, 19, 24, 29, 34]; 
+            break;
         case 'chord-melody':
         default: voicingIntervals = [0, 7, 4, 11, 14, 18, 24, 26]; break;
     }
