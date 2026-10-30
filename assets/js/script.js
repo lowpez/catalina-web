@@ -1,12 +1,13 @@
 /**
- * CATALINA WEB - Core Engine v4.3.7 (Generative Organic Entropy Fix)
+ * CATALINA WEB - Core Engine v4.3.8 (Expanded Emotional Palettes)
  * 
- * BASE EXACTA: v4.3.6 (Color Tímbrico Exponencial + Nota Raíz Completa)
- * MEJORA CRÍTICA: Corrección de la lógica de entropía en modo Generativo.
- * 1. selectNoteWithEntropy: Salto mínimo de 1 nota para evitar estancamiento melódico.
- * 2. processColumnForMusic: Probabilidad y throttle ajustados para que 0% sea espaciado/calmado.
- * 3. exportWAV: Sincronización exacta de la lógica generativa con la reproducción en vivo.
- * Resultado: El slider de Entropía ahora controla la "Intensidad Emocional" de forma natural.
+ * BASE EXACTA: v4.3.7 (Generative Organic Entropy Fix)
+ * MEJORA CRÍTICA: Expansión del vocabulario armónico con 3 nuevas texturas emocionales.
+ * 1. Hijaz [0, 1, 4, 5, 7, 8, 10]: Sonido exótico/oriental, misterioso y ancestral.
+ * 2. Locrian [0, 1, 3, 5, 6, 8, 10]: Inestabilidad cinemática, tritono y suspenso (estilo Zimmer).
+ * 3. Hirajoshi [0, 2, 3, 7, 8]: Fluidez zen japonesa, sin tensión resolutiva, ideal para meditación.
+ * Resultado: El usuario puede ahora transformar la misma imagen en paisajes sonoros completamente 
+ * distintos (desde templos antiguos hasta thrillers psicológicos) solo cambiando la escala.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -61,7 +62,18 @@ const SCALES = {
     major: [0, 2, 4, 5, 7, 9, 11],
     minor: [0, 2, 3, 5, 7, 8, 10],
     pentatonic: [0, 2, 4, 7, 9],
-    pentatonicMinor: [0, 3, 5, 7, 10]
+    pentatonicMinor: [0, 3, 5, 7, 10],
+    
+    // NUEVAS TEXTURAS v4.3.8
+    
+    // 1. Exótica / Árabe: Hijaz (Sonido misterioso, oriental)
+    hijaz: [0, 1, 4, 5, 7, 8, 10],
+    
+    // 2. Suspenso / Zimmer: Locrian (Tritono inestable, oscuridad cinematográfica)
+    locrian: [0, 1, 3, 5, 6, 8, 10],
+    
+    // 3. Zen / Japonesa: In Scale (Flotante, sin tensión resolutiva clara)
+    Hirajoshi: [0, 2, 3, 7, 8]
 };
 
 function midiToFreq(midiNote) {
