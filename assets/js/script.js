@@ -1,13 +1,13 @@
 /**
- * CATALINA WEB - Core Engine v4.3.8 (Expanded Emotional Palettes)
+ * CATALINA WEB - Core Engine v4.3.9 (Adaptive Band Balance)
  * 
- * BASE EXACTA: v4.3.7 (Generative Organic Entropy Fix)
- * MEJORA CRÍTICA: Expansión del vocabulario armónico con 3 nuevas texturas emocionales.
- * 1. Hijaz [0, 1, 4, 5, 7, 8, 10]: Sonido exótico/oriental, misterioso y ancestral.
- * 2. Locrian [0, 1, 3, 5, 6, 8, 10]: Inestabilidad cinemática, tritono y suspenso (estilo Zimmer).
- * 3. Hirajoshi [0, 2, 3, 7, 8]: Fluidez zen japonesa, sin tensión resolutiva, ideal para meditación.
- * Resultado: El usuario puede ahora transformar la misma imagen en paisajes sonoros completamente 
- * distintos (desde templos antiguos hasta thrillers psicológicos) solo cambiando la escala.
+ * BASE EXACTA: v4.3.8 (Expanded Emotional Palettes)
+ * MEJORA CRÍTICA: Implementación de Balance Adaptativo de Bandas.
+ * 1. Análisis previo de la imagen para detectar bandas con líneas continuas vs. rítmicas.
+ * 2. Atenuación automática y suave de bandas con >50% de activación para evitar saturación.
+ * 3. Preservación del volumen completo en bandas con actividad rítmica o espaciada.
+ * Resultado: Las partituras gráficas con líneas horizontales continuas ya no dominan el sonido,
+ * permitiendo que los detalles rítmicos, las pausas y las texturas se escuchen con claridad.
  */
 
 // --- CONFIGURACIÓN Y ESTADO ---
@@ -53,7 +53,10 @@ const state = {
     reverb: null,
     delay: null,
     lastGenTime: 0,
-    lastLinealTime: 0
+    lastLinealTime: 0,
+    
+    // NUEVO: Almacena el factor de atenuación por banda (0.4 a 1.0)
+    bandBalance: null
 };
 
 // --- UTILIDADES MUSICALES ---
@@ -64,16 +67,16 @@ const SCALES = {
     pentatonic: [0, 2, 4, 7, 9],
     pentatonicMinor: [0, 3, 5, 7, 10],
     
-    // NUEVAS TEXTURAS v4.3.8
+    // NUEVOS MODOS ARMÓNICOS
     
     // 1. Exótica / Árabe: Hijaz (Sonido misterioso, oriental)
     hijaz: [0, 1, 4, 5, 7, 8, 10],
     
-    // 2. Suspenso / Zimmer: Locrian (Tritono inestable, oscuridad cinematográfica)
+    // 2. Suspenso / Cinemática: Locrian (Tritono inestable, oscuridad)
     locrian: [0, 1, 3, 5, 6, 8, 10],
     
-    // 3. Zen / Japonesa: In Scale (Flotante, sin tensión resolutiva clara)
-    Hirajoshi: [0, 2, 3, 7, 8]
+    // 3. Zen / Japonesa: Hirajoshi (Flotante, sin tensión resolutiva clara)
+    hirajoshi: [0, 2, 3, 7, 8]
 };
 
 function midiToFreq(midiNote) {
@@ -172,7 +175,7 @@ const scrubSlider = document.getElementById('paramScrub');
 function drawBandsOverlay() {
     if (!state.width || !state.height) return;
     const bandHeight = state.height / CONFIG.bands;
-    ctx.strokeStyle = 'rgba(135, 0, 17, 0.3)'/*'rgba(0, 255, 157, 0.3)'*/;
+    ctx.strokeStyle = 'rgba(135, 0, 17, 0.3)';
     ctx.lineWidth = 3;
     ctx.setLineDash([4, 4]);
     for (let i = 1; i < CONFIG.bands; i++) {
@@ -334,8 +337,12 @@ function processColumnForMusic(xIndex, currentTime) {
             
             state.linealVoices[b].frequency.rampTo(chordFreqs[b], 0.1);
             
-            // Ganancia ajustada a 0.75 para evitar saturación del Limiter
-            const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 0.75 : 0;
+            // APLICAR BALANCE ADAPTATIVO POR BANDA
+            const balanceFactor = state.bandBalance ? state.bandBalance[b] : 1.0;
+            
+            // Ganancia ajustada a 0.75 * balanceFactor para evitar saturación del Limiter
+            const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 0.75 * balanceFactor : 0;
+            
             state.linealGains[b].gain.rampTo(targetGain, 0.15);
         }
     }
@@ -450,7 +457,7 @@ function updateUIPosition(progress) {
 }
 
 // ==============================================================================
-// PROCESAMIENTO DE IMAGEN
+// PROCESAMIENTO DE IMAGEN (CON ANÁLISIS ADAPTATIVO)
 // ==============================================================================
 
 document.getElementById('imageInput').addEventListener('change', (e) => {
@@ -502,6 +509,26 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
             }
         }
 
+        // ANÁLISIS ADAPTATIVO DE BANDAS
+        // Detecta automáticamente qué bandas son "continuas" vs "rítmicas"
+        const bandActivity = new Array(CONFIG.bands).fill(0);
+        for (let x = 0; x < targetWidth; x++) {
+            for (let b = 0; b < CONFIG.bands; b++) {
+                const brightness = state.columnData[x * CONFIG.bands + b];
+                const isActive = state.isInverted ? (1 - brightness) > 0.15 : brightness > 0.15;
+                if (isActive) bandActivity[b]++;
+            }
+        }
+        
+        // Calcular factor de balance por banda con curva suave
+        // 0% activo = 1.0 gain, 100% activo = 0.4 gain (nunca se silencia por completo)
+        state.bandBalance = bandActivity.map(activations => {
+            const activityRatio = activations / targetWidth;
+            return Math.max(0.4, 1.0 - Math.pow(activityRatio, 2));
+        });
+        
+        console.log("Band balance:", state.bandBalance.map(b => b.toFixed(2)).join(', '));
+
         ctx.putImageData(imageData, 0, 0);
         drawBandsOverlay();
         
@@ -517,7 +544,7 @@ document.getElementById('imageInput').addEventListener('change', (e) => {
 });
 
 // ==============================================================================
-// EXPORTACIÓN A WAV
+// EXPORTACIÓN A WAV (CON BALANCE ADAPTATIVO)
 // ==============================================================================
 
 async function exportWAV() {
@@ -644,7 +671,14 @@ async function exportWAV() {
                             if (state.isInverted) brightness = 1 - brightness;
                             
                             offLinealVoices[b].frequency.rampTo(chordFreqs[b], 0.1, t);
-                            const targetGain = brightness > 0.05 ? Math.pow(brightness, 1.2) * 0.75 : 0;
+                            
+                            // APLICAR BALANCE ADAPTATIVO POR BANDA EN EXPORTACIÓN
+                            const balanceFactor = state.bandBalance ? state.bandBalance[b] : 1.0;
+                            
+                            const targetGain = brightness > 0.05 
+                                ? Math.pow(brightness, 1.2) * 0.75 * balanceFactor 
+                                : 0;
+                                
                             offLinealGains[b].gain.rampTo(targetGain, 0.15, t);
                         }
                         lastLinealTime = t;
@@ -717,6 +751,7 @@ function resetToDefaults() {
     state.exportDuration = 60;
     state.freqMin = 65.41;
     state.freqMax = 1046.50;
+    state.bandBalance = null; // <-- Reiniciar balance adaptativo
     
     state.isInverted = true;
     state.isLooping = true;
